@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -142,7 +143,7 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 		var data map[string]interface{}
 		if jsonStr != "" {
 			if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
-				log.Log().Warn("解析JSON数据失败", "error", err, "json", jsonStr)
+				log.Log().Warn("解析JSON数据失败", "error", err)
 				return make(map[string]interface{})
 			}
 		}
@@ -218,7 +219,7 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 	}
 	config.SpeakerChatMode = normalizeSpeakerChatMode(config.SpeakerChatMode)
 
-	log.Log().Infof("成功获取设备配置: deviceId: %s, config: %+v", deviceID, config)
+	log.Log().Info("成功获取设备配置", "device_id", deviceID)
 	return config, nil
 }
 
@@ -323,7 +324,7 @@ func (c *ConfigManager) SwitchDeviceRoleByName(ctx context.Context, deviceID str
 		return "", fmt.Errorf("切换设备角色失败: %w", err)
 	}
 	if response.Error != "" {
-		return "", fmt.Errorf(response.Error)
+		return "", errors.New(response.Error)
 	}
 	if strings.TrimSpace(response.Data.RoleName) == "" {
 		return "", fmt.Errorf("切换设备角色失败: 未返回匹配角色")
@@ -352,7 +353,7 @@ func (c *ConfigManager) RestoreDeviceDefaultRole(ctx context.Context, deviceID s
 		return fmt.Errorf("恢复默认角色失败: %w", err)
 	}
 	if response.Error != "" {
-		return fmt.Errorf(response.Error)
+		return errors.New(response.Error)
 	}
 	return nil
 }

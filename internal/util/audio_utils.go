@@ -178,9 +178,9 @@ func (d *AudioDecoder) WithTargetAudioFormat(targetAudioFormat string) *AudioDec
 
 func (d *AudioDecoder) Run(startTs int64) error {
 	if d.AudioFormat == "wav" {
-		d.RunWavDecoder(startTs, false)
+		return d.RunWavDecoder(startTs, false)
 	} else if d.AudioFormat == "pcm" {
-		d.RunWavDecoder(startTs, true)
+		return d.RunWavDecoder(startTs, true)
 	} else if d.AudioFormat == "mp3" {
 		return d.RunMp3Decoder(startTs)
 	} else if d.AudioFormat == "opus" {

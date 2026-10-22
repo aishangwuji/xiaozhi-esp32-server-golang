@@ -964,7 +964,7 @@ func parseUintParam(c *gin.Context, name string) (uint, bool) {
 	return uint(id), true
 }
 
-func getVoiceOptionsForUser(db *gorm.DB, c *gin.Context, targetUserID uint, provider, configID, overrideURL, overrideAPIKey string) ([]VoiceOption, error) {
+func getVoiceOptionsForUser(db *gorm.DB, c *gin.Context, targetUserID uint, provider, configID, overrideURL, overrideAPIKey, overrideModel string) ([]VoiceOption, error) {
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		return nil, fmt.Errorf("provider参数必填")
@@ -979,7 +979,9 @@ func getVoiceOptionsForUser(db *gorm.DB, c *gin.Context, targetUserID uint, prov
 		}
 		systemVoices = voices
 	} else if provider == "aliyun_qwen" {
-		if configID == "" {
+		if model := strings.TrimSpace(overrideModel); model != "" {
+			systemVoices = GetAliyunQwenVoicesByModel(model)
+		} else if configID == "" {
 			systemVoices = GetVoiceOptionsByProvider("aliyun_qwen")
 		} else {
 			var cfg models.Config

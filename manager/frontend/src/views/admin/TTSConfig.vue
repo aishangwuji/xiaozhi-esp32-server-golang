@@ -120,6 +120,7 @@ import { testSingleConfig, testWithData, parseJsonData } from '../../utils/confi
 import TTSConfigForm from './forms/TTSConfigForm.vue'
 import { TTS_PROVIDERS_WITH_VOICES } from './forms/ttsProviderOptions'
 import { resolveTTSProvider } from './forms/configProviderUtils'
+import { normalizeAliyunTtsConfig, reconcileAliyunVoice } from './forms/aliyunTtsOptions'
 
 const configs = ref([])
 const testingId = ref(null)
@@ -135,6 +136,7 @@ const formRef = ref()
 // 音色列表相关
 const voiceOptions = ref([])
 const voiceLoading = ref(false)
+let voiceRequestId = 0
 
 const form = reactive({
   name: '',
@@ -157,7 +159,9 @@ const form = reactive({
     region: 'beijing',
     model: 'qwen3-tts-flash',
     voice: 'Cherry',
+    voice_prompt: '',
     language_type: 'Chinese',
+    format: 'pcm',
     stream: true,
     frame_duration: 60
   },
@@ -352,9 +356,6 @@ const editConfig = (config) => {
   form.enabled = config.enabled
   form.double_stream = false
 
-  // IndexTTS 改为点击音色下拉时再请求
-  loadVoiceOptions(config.provider)
-
   // 解析配置JSON并填充到对应的表单字段
   try {
     const configData = JSON.parse(config.json_data || '{}')
@@ -400,14 +401,7 @@ const editConfig = (config) => {
         form.edge_offline.frame_duration = configData.frame_duration || 20
         break
       case 'aliyun_qwen':
-        form.qwen_tts.api_key = configData.api_key || ''
-        form.qwen_tts.api_url = configData.api_url || 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation'
-        form.qwen_tts.region = configData.region || 'beijing'
-        form.qwen_tts.model = configData.model || 'qwen3-tts-flash'
-        form.qwen_tts.voice = configData.voice || 'Cherry'
-        form.qwen_tts.language_type = configData.language_type || 'Chinese'
-        form.qwen_tts.stream = configData.stream !== undefined ? configData.stream : true
-        form.qwen_tts.frame_duration = configData.frame_duration || 60
+        Object.assign(form.qwen_tts, normalizeAliyunTtsConfig(configData))
         break
       case 'openai':
         form.openai.api_key = configData.api_key || ''
@@ -713,7 +707,9 @@ const resetForm = () => {
       region: 'beijing',
       model: 'qwen3-tts-flash',
       voice: 'Cherry',
+      voice_prompt: '',
       language_type: 'Chinese',
+      format: 'pcm',
       stream: true,
       frame_duration: 60
     },
@@ -845,27 +841,38 @@ const formatDate = (dateString) => {
 
 // 加载音色列表
 const loadVoiceOptions = async (provider, options = {}) => {
+  const requestId = ++voiceRequestId
+  if (!showDialog.value) return
   const trigger = options?.trigger || 'auto'
   if (!provider) {
     voiceOptions.value = []
+    voiceLoading.value = false
     return
   }
 
   // IndexTTS 仅在下拉展开时请求
   if (provider === 'indextts_vllm' && trigger !== 'dropdown') {
     voiceOptions.value = []
+    voiceLoading.value = false
     return
   }
   
   // 只有这些 provider 需要从后端获取音色列表
   if (!TTS_PROVIDERS_WITH_VOICES.includes(provider)) {
     voiceOptions.value = []
+    voiceLoading.value = false
     return
   }
   
   voiceLoading.value = true
   try {
     const params = { provider, config_id: form.config_id || undefined }
+    if (provider === 'aliyun_qwen') {
+      const model = String(form.qwen_tts?.model || '').trim()
+      if (model) {
+        params.model = model
+      }
+    }
     if (provider === 'indextts_vllm') {
       const apiURL = String(form.indextts_vllm?.api_url || '').trim()
       const apiKey = String(form.indextts_vllm?.api_key || '').trim()
@@ -876,15 +883,22 @@ const loadVoiceOptions = async (provider, options = {}) => {
         params.api_key = apiKey
       }
     }
+    const previousOptions = voiceOptions.value
     const response = await api.get(`/user/voice-options`, {
       params
     })
-    voiceOptions.value = response.data.data || []
+    if (requestId !== voiceRequestId || !showDialog.value) return
+    const nextOptions = response.data.data || []
+    voiceOptions.value = nextOptions
+    if (provider === 'aliyun_qwen') {
+      form.qwen_tts.voice = reconcileAliyunVoice(previousOptions, nextOptions, form.qwen_tts.voice)
+    }
   } catch (error) {
+    if (requestId !== voiceRequestId || !showDialog.value) return
     console.error('加载音色列表失败:', error)
     voiceOptions.value = []
   } finally {
-    voiceLoading.value = false
+    if (requestId === voiceRequestId) voiceLoading.value = false
   }
 }
 
@@ -900,10 +914,19 @@ watch(() => form.provider, (newProvider) => {
   }
 }, { immediate: false })
 
+watch(() => form.qwen_tts.model, (newModel) => {
+  if (showDialog.value && form.provider === 'aliyun_qwen') {
+    loadVoiceOptions('aliyun_qwen')
+  }
+})
+
 // 监听对话框打开，加载当前 provider 的音色列表（nextTick 确保弹窗已渲染后再请求）
 watch(showDialog, (isOpen) => {
   if (isOpen && form.provider) {
     nextTick(() => loadVoiceOptions(form.provider))
+  } else if (!isOpen) {
+    voiceRequestId++
+    voiceLoading.value = false
   }
 })
 

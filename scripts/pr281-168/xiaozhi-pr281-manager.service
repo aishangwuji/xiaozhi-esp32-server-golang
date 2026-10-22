@@ -1,0 +1,18 @@
+[Unit]
+Description=Xiaozhi PR281 isolated SQLite manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hackers365
+Group=hackers365
+WorkingDirectory=/home/hackers365/shijingbo/git/pr281-sqlite/manager/backend
+ExecStart=/home/hackers365/shijingbo/git/pr281-sqlite/manager/backend/main -c config/config.json
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -91,7 +91,6 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 	// 添加登录调试日志
 	log.Printf("[Login] 尝试登录用户: %s, 客户端IP: %s", req.Username, c.ClientIP())
-	log.Printf("[Login] 接收到的密码长度: %d", len(req.Password))
 
 	// 如果数据库可用，尝试从数据库验证
 	if ac.DB != nil {
@@ -99,7 +98,6 @@ func (ac *AuthController) Login(c *gin.Context) {
 		var user models.User
 		if err := ac.DB.Where("username = ?", req.Username).First(&user).Error; err == nil {
 			log.Printf("[Login] 找到用户: ID=%d, Username=%s, Role=%s, Email=%s", user.ID, user.Username, user.Role, user.Email)
-			log.Printf("[Login] 数据库中密码哈希长度: %d, 哈希前缀: %s", len(user.Password), user.Password[:10])
 			log.Printf("[Login] 开始bcrypt密码比较验证")
 
 			if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err == nil {
@@ -124,7 +122,6 @@ func (ac *AuthController) Login(c *gin.Context) {
 				return
 			} else {
 				log.Printf("[Login] ❌ 密码验证失败 - 用户: %s, bcrypt错误: %v", req.Username, err)
-				log.Printf("[Login] 调试信息 - 输入密码: '%s', 哈希: '%s'", req.Password, user.Password)
 			}
 		} else {
 			log.Printf("[Login] ❌ 用户不存在 - 用户名: %s, 数据库错误: %v", req.Username, err)
@@ -133,23 +130,8 @@ func (ac *AuthController) Login(c *gin.Context) {
 		log.Printf("[Login] ❌ 数据库连接不可用")
 	}
 
-	// Fallback: 硬编码的admin用户验证（当数据库不可用时）
-	if req.Username == "admin" && req.Password == "admin123" {
-		token, err := middleware.GenerateToken(1, "admin", "admin")
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "生成token失败"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"token": token,
-			"user": gin.H{
-				"id":       1,
-				"username": "admin",
-				"email":    "admin@xiaozhi.com",
-				"role":     "admin",
-			},
-		})
+	if ac.DB == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "数据库连接不可用"})
 		return
 	}
 

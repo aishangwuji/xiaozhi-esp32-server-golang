@@ -2736,6 +2736,7 @@ func (ac *AdminController) GetUserVoiceOptionsAdmin(c *gin.Context) {
 		c.Query("config_id"),
 		c.Query("api_url"),
 		c.Query("api_key"),
+		c.Query("model"),
 	)
 	if err != nil {
 		status := http.StatusBadRequest

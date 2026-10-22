@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
 	"xiaozhi/manager/backend/config"
 	"xiaozhi/manager/backend/database"
+	"xiaozhi/manager/backend/middleware"
 	"xiaozhi/manager/backend/router"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +21,9 @@ func main() {
 
 	// 加载配置
 	cfg := config.LoadWithPath(configFile)
+	if err := middleware.ConfigureJWT(cfg.JWT.Secret, cfg.JWT.ExpireHour); err != nil {
+		log.Fatal("JWT 配置无效: ", err)
+	}
 
 	// 初始化数据库
 	db := database.Init(cfg.Database)
@@ -38,7 +43,7 @@ func main() {
 	// 启动服务器
 	log.Printf("使用配置文件: %s", configFile)
 	log.Printf("服务器启动在端口: %s", cfg.Server.Port)
-	if err := r.Run(":" + cfg.Server.Port); err != nil {
+	if err := r.Run(net.JoinHostPort(cfg.Server.Host, cfg.Server.Port)); err != nil {
 		log.Fatal("服务器启动失败:", err)
 	}
 }
