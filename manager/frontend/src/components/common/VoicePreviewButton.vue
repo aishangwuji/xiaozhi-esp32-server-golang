@@ -27,6 +27,7 @@ const props = defineProps({
   model: { type: String, default: '' },
   voice: { type: String, default: '' },
   instruction: { type: String, default: '' },
+  languageType: { type: String, default: '' },
   apiKey: { type: String, default: '' },
   apiUrl: { type: String, default: '' },
   region: { type: String, default: '' },
@@ -89,6 +90,7 @@ const handleTogglePlay = async () => {
       model: props.model,
       voice: props.voice,
       instruction: props.instruction,
+      language_type: props.languageType,
       text: props.text || '你好，我是小智，这是为您演示的音色与试听效果。'
     }
     if (props.isAdmin) {

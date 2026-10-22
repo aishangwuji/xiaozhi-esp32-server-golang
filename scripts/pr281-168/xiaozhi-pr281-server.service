@@ -1,0 +1,19 @@
+[Unit]
+Description=Xiaozhi PR281 isolated WebSocket server
+After=network-online.target xiaozhi-pr281-manager.service
+Requires=xiaozhi-pr281-manager.service
+
+[Service]
+Type=simple
+User=hackers365
+Group=hackers365
+WorkingDirectory=/home/hackers365/shijingbo/git/pr281-sqlite
+Environment=LD_LIBRARY_PATH=/home/hackers365/shijingbo/git/pr281-sqlite/lib/ten-vad/lib/Linux/x64:/usr/local/lib
+ExecStart=/home/hackers365/shijingbo/git/pr281-sqlite/xiaozhi_server -c config/config.yaml -manager-enable=false -asr-enable=false
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

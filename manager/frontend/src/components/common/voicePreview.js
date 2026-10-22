@@ -3,7 +3,7 @@ export function supportsAliyunPreview(provider) {
 }
 
 export function previewPlaybackIdentity(value = {}) {
-  return [value.provider, value.configId, value.model, value.voice, value.instruction, value.apiKey, value.apiUrl, value.region, value.text].map((item) => String(item || '')).join('\u0000')
+  return [value.provider, value.configId, value.model, value.voice, value.instruction, value.languageType, value.apiKey, value.apiUrl, value.region, value.text].map((item) => String(item || '')).join('\u0000')
 }
 
 export async function extractPreviewError(error) {

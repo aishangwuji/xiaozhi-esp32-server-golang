@@ -19,6 +19,7 @@ type Config struct {
 }
 
 type ServerConfig struct {
+	Host string `json:"host"`
 	Port string `json:"port"`
 	Mode string `json:"mode"`
 }
@@ -117,8 +118,6 @@ func LoadWithPath(configPath string) *Config {
 	if audioBasePath := os.Getenv("AUDIO_BASE_PATH"); audioBasePath != "" {
 		config.History.AudioBasePath = audioBasePath
 	}
-
-	fmt.Println("config", config)
 
 	return config
 }

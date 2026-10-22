@@ -2,10 +2,10 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -93,6 +93,9 @@ func TestResolveAdminPreviewUsesRegionEndpointAndRejectsOtherProviders(t *testin
 	if resolved.APIURL != defaultAliyunPreviewAPIURLSingapore {
 		t.Fatalf("APIURL = %q", resolved.APIURL)
 	}
+	if resolved.LanguageType != "Chinese" {
+		t.Fatalf("LanguageType = %q", resolved.LanguageType)
+	}
 	if _, err := controller.resolvePreviewRequest(TTSPreviewRequest{Provider: "cosyvoice", APIKey: "key"}, false); err == nil {
 		t.Fatal("local cosyvoice preview unexpectedly allowed")
 	}
@@ -115,6 +118,42 @@ func TestAliyunPreviewURLValidation(t *testing.T) {
 	if err := validateAliyunPreviewURL("https://dashscope-result.oss-cn-shanghai.aliyuncs.com/audio.wav", true); err != nil {
 		t.Fatal(err)
 	}
+	for _, raw := range []string{
+		"https://evil.aliyuncs.com/audio.wav",
+		"https://dashscope-result.oss-cn-shanghai.aliyuncs.com.evil.test/audio.wav",
+		"https://127.0.0.1/audio.wav",
+		"https://dashscope-result.oss-cn-shanghai.aliyuncs.com:8443/audio.wav",
+		"https://user@dashscope-result.oss-cn-shanghai.aliyuncs.com/audio.wav",
+	} {
+		if _, err := normalizeAliyunPreviewAudioURL(raw); err == nil {
+			t.Fatalf("audio URL %q unexpectedly allowed", raw)
+		}
+	}
+	got, err := normalizeAliyunPreviewAudioURL("http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/a.wav?Expires=123&Signature=abc")
+	if err != nil || got != "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/a.wav?Expires=123&Signature=abc" {
+		t.Fatalf("normalized audio URL = %q, err = %v", got, err)
+	}
+}
+
+func TestAliyunPreviewRedirectsStayOnHTTPSOSS(t *testing.T) {
+	controller := NewTTSPreviewController(nil)
+	apiRequest, _ := http.NewRequest(http.MethodPost, defaultAliyunPreviewAPIURLBeijing, nil)
+	ossURL, _ := url.Parse("http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/audio.wav?Signature=abc")
+	redirect := &http.Request{Method: http.MethodGet, URL: ossURL}
+	if err := controller.HTTPClient.CheckRedirect(redirect, []*http.Request{apiRequest}); err == nil {
+		t.Fatal("API redirect to OSS unexpectedly allowed")
+	}
+	audioRequest, _ := http.NewRequest(http.MethodGet, "https://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/start.wav", nil)
+	if err := controller.HTTPClient.CheckRedirect(redirect, []*http.Request{audioRequest}); err != nil {
+		t.Fatal(err)
+	}
+	if redirect.URL.Scheme != "https" || redirect.URL.RawQuery != "Signature=abc" {
+		t.Fatalf("redirect URL = %s", redirect.URL)
+	}
+	redirect.URL, _ = url.Parse("https://evil.example.com/audio.wav")
+	if err := controller.HTTPClient.CheckRedirect(redirect, []*http.Request{audioRequest}); err == nil {
+		t.Fatal("cross-domain audio redirect unexpectedly allowed")
+	}
 }
 
 func TestBuildAliyunPreviewRequestBodyUsesModelCapabilities(t *testing.T) {
@@ -134,7 +173,7 @@ func TestBuildAliyunPreviewRequestBodyUsesModelCapabilities(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			body := buildAliyunPreviewRequestBody(TTSPreviewRequest{Model: tt.model, Voice: "Cherry", Text: "hello", Instruction: tt.instruction, Format: "ogg_opus"})
+			body := buildAliyunPreviewRequestBody(TTSPreviewRequest{Model: tt.model, Voice: "Cherry", Text: "hello", Instruction: tt.instruction, LanguageType: "English"})
 			if body["model"] != tt.wantModel {
 				t.Fatalf("model = %v", body["model"])
 			}
@@ -147,67 +186,66 @@ func TestBuildAliyunPreviewRequestBodyUsesModelCapabilities(t *testing.T) {
 			if hasSingular != tt.wantSingular {
 				t.Fatalf("input = %#v", input)
 			}
-			if strings.HasPrefix(tt.model, "qwen-audio-") {
-				if input["format"] != "opus" || input["sample_rate"] != 24000 {
+			if strings.HasPrefix(tt.model, "qwen-audio-") || strings.HasPrefix(tt.model, "cosyvoice") {
+				if input["format"] != "wav" || input["sample_rate"] != 24000 {
 					t.Fatalf("SpeechSynthesizer fields = %#v", input)
 				}
+				if _, ok := input["language_type"]; ok {
+					t.Fatalf("SpeechSynthesizer must not send language_type: %#v", input)
+				}
+			} else if _, ok := input["format"]; ok {
+				t.Fatalf("Qwen-TTS must not send format: %#v", input)
+			} else if input["language_type"] != "English" {
+				t.Fatalf("Qwen-TTS language_type = %#v", input["language_type"])
 			}
 		})
 	}
 }
 
-func TestQwenTTSOfficialPreviewNeverAppliesToQwenAudio(t *testing.T) {
-	if got := qwenTTSOfficialPreviewURL("qwen3-tts-flash", "Cherry"); got == "" {
-		t.Fatal("Qwen-TTS Cherry official preview URL is missing")
-	}
-	if got := qwenTTSOfficialPreviewURL("qwen-audio-3.0-tts-flash", "Cherry"); got != "" {
-		t.Fatalf("Qwen-Audio unexpectedly reused Qwen-TTS preview: %q", got)
-	}
-}
-
-func TestPreviewAliyunTTSUsesOfficialQwenTTSWaveWithoutSynthesis(t *testing.T) {
+func TestPreviewAliyunTTSSynthesizesRequestedTextAndDownloadsOSSOverHTTPS(t *testing.T) {
 	controller := NewTTSPreviewController(nil)
+	requests := 0
 	controller.HTTPClient = &http.Client{Transport: previewRoundTripFunc(func(req *http.Request) (*http.Response, error) {
-		if req.Method != http.MethodGet || req.URL.Hostname() != "help-static-aliyun-doc.aliyuncs.com" {
-			t.Fatalf("unexpected official preview request: %s %s", req.Method, req.URL)
+		requests++
+		if requests == 1 {
+			if req.Method != http.MethodPost || req.URL.Hostname() != "dashscope.aliyuncs.com" || req.Header.Get("Authorization") != "Bearer test-key" {
+				t.Fatalf("unexpected synthesis request: %s %s", req.Method, req.URL)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			input := body["input"].(map[string]any)
+			if input["text"] != "custom preview text" || input["voice"] != "Cherry" {
+				t.Fatalf("synthesis input = %#v", input)
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"output":{"audio":{"url":"http://dashscope-result-bj.oss-cn-beijing.aliyuncs.com/sample.wav?Expires=123"}}}`)), Request: req}, nil
+		}
+		if req.Method != http.MethodGet || req.URL.Scheme != "https" || req.URL.Hostname() != "dashscope-result-bj.oss-cn-beijing.aliyuncs.com" || req.URL.RawQuery != "Expires=123" {
+			t.Fatalf("unexpected audio request: %s %s", req.Method, req.URL)
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"audio/wav"}},
-			Body:       io.NopCloser(strings.NewReader("RIFF-test")),
+			Body:       io.NopCloser(strings.NewReader("RIFFxxxxWAVEaudio")),
 			Request:    req,
 		}, nil
 	})}
 
-	audio, contentType, err := controller.previewAliyunTTS(context.Background(), "", defaultAliyunPreviewAPIURLBeijing, TTSPreviewRequest{
-		Model: "qwen3-tts-flash", Voice: "Cherry", Text: "ignored for official system preview",
+	audio, contentType, err := controller.previewAliyunTTS(context.Background(), "test-key", defaultAliyunPreviewAPIURLBeijing, TTSPreviewRequest{
+		Model: "qwen3-tts-flash", Voice: "Cherry", Text: "custom preview text",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(audio) != "RIFF-test" || contentType != "audio/wav" {
-		t.Fatalf("audio=%q contentType=%q", audio, contentType)
+	if string(audio) != "RIFFxxxxWAVEaudio" || contentType != "audio/wav" || requests != 2 {
+		t.Fatalf("audio=%q contentType=%q requests=%d", audio, contentType, requests)
 	}
 }
 
-func TestLoadQwenAudioOfficialPreviewUsesOnlyItsOwnVoicePack(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XIAOZHI_QWEN_AUDIO_PREVIEW_DIR", dir)
-	if err := os.WriteFile(filepath.Join(dir, "longcanzhuyue.wav"), []byte("RIFF-qwen-audio"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	audio, found, err := loadQwenAudioOfficialPreview(
-		"qwen-audio-3.0-tts-flash",
-		"qwen-audio-3.0-tts-flash-longcanzhuyue",
-	)
-	if err != nil || !found || string(audio) != "RIFF-qwen-audio" {
-		t.Fatalf("audio=%q found=%v err=%v", audio, found, err)
-	}
-	if _, found, err := loadQwenAudioOfficialPreview("qwen3-tts-flash", "Cherry"); err != nil || found {
-		t.Fatalf("Qwen-TTS unexpectedly used Qwen-Audio pack: found=%v err=%v", found, err)
-	}
-	if _, found, err := loadQwenAudioOfficialPreview("qwen-audio-3.0-tts-flash", "../longcanzhuyue"); err != nil || found {
-		t.Fatalf("unsafe voice path result: found=%v err=%v", found, err)
+func TestPreviewRequiresAPIKeyEvenForSystemVoice(t *testing.T) {
+	controller := NewTTSPreviewController(nil)
+	if _, err := controller.resolvePreviewRequest(TTSPreviewRequest{Provider: "aliyun_qwen", Model: "qwen3-tts-flash", Voice: "Cherry"}, false); err == nil {
+		t.Fatal("system voice preview unexpectedly allowed without API key")
 	}
 }

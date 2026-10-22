@@ -10,6 +10,7 @@ import (
 	log "xiaozhi-esp32-server-golang/logger"
 	mbconfig "xiaozhi/manager/backend/config"
 	"xiaozhi/manager/backend/database"
+	"xiaozhi/manager/backend/middleware"
 	"xiaozhi/manager/backend/router"
 
 	"github.com/gin-gonic/gin"
@@ -35,6 +36,10 @@ func StartManagerHTTP(configPath string) {
 	log.Infof("正在启动内嵌 manager HTTP 服务，配置文件: %s", configPath)
 
 	cfg := mbconfig.LoadWithPath(configPath)
+	if err := middleware.ConfigureJWT(cfg.JWT.Secret, cfg.JWT.ExpireHour); err != nil {
+		log.Errorf("manager JWT 配置无效: %v", err)
+		return
+	}
 	port := cfg.Server.Port
 	if port == "" {
 		port = defaultManagerHTTPPort

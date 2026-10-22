@@ -3,15 +3,26 @@ package manager
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
 
 func TestConfigManager_GetSystemConfig(t *testing.T) {
-	// 创建配置管理器
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/system/configs" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"mqtt":{},"mqtt_server":{},"udp":{},"ota":{}}}`))
+	}))
+	defer server.Close()
+
 	config := map[string]interface{}{
-		"backend_url": "http://192.168.208.214:8080", // 根据实际backend地址调整
+		"backend_url": server.URL,
 	}
 
 	manager, err := NewManagerUserConfigProvider(config)
@@ -43,6 +54,4 @@ func TestConfigManager_GetSystemConfig(t *testing.T) {
 		}
 	}
 
-	fmt.Printf("获取到的系统配置: %s\n", configJSON)
-	t.Logf("配置大小: %d 字节", len(configJSON))
 }

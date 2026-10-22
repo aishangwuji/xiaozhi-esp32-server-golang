@@ -545,6 +545,7 @@ const ttsForm = reactive({
 const ttsFormRef = ref()
 const voiceOptions = ref([])
 const voiceLoading = ref(false)
+let voiceRequestId = 0
 const ttsFormRules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
   config_id: [{ required: true, message: '请输入配置ID', trigger: 'blur' }],
@@ -1282,12 +1283,16 @@ async function loadOtaIfExists() {
 
 // 加载 TTS 音色列表（与 TTS 配置页一致）
 async function loadTtsVoiceOptions(provider) {
+  const requestId = ++voiceRequestId
+  if (currentStep.value !== 4) return
   if (!provider) {
     voiceOptions.value = []
+    voiceLoading.value = false
     return
   }
   if (!TTS_PROVIDERS_WITH_VOICES.includes(provider)) {
     voiceOptions.value = []
+    voiceLoading.value = false
     return
   }
   voiceLoading.value = true
@@ -1301,16 +1306,18 @@ async function loadTtsVoiceOptions(provider) {
     }
     const previousOptions = voiceOptions.value
     const response = await api.get('/user/voice-options', { params })
+    if (requestId !== voiceRequestId || currentStep.value !== 4) return
     const nextOptions = response.data.data || []
     voiceOptions.value = nextOptions
     if (provider === 'aliyun_qwen') {
       ttsForm.qwen_tts.voice = reconcileAliyunVoice(previousOptions, nextOptions, ttsForm.qwen_tts.voice)
     }
   } catch (error) {
+    if (requestId !== voiceRequestId || currentStep.value !== 4) return
     console.error('加载音色列表失败:', error)
     voiceOptions.value = []
   } finally {
-    voiceLoading.value = false
+    if (requestId === voiceRequestId) voiceLoading.value = false
   }
 }
 
@@ -1322,6 +1329,9 @@ function handleTtsVoiceOptionsRequest(provider) {
 watch(currentStep, (step) => {
   if (step === 4 && ttsForm.provider) {
     nextTick(() => loadTtsVoiceOptions(ttsForm.provider))
+  } else if (step !== 4) {
+    voiceRequestId++
+    voiceLoading.value = false
   }
 }, { immediate: true })
 

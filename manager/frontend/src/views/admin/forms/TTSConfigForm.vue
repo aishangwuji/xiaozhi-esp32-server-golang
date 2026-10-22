@@ -146,6 +146,7 @@
             :model="model.qwen_tts.model"
             :voice="model.qwen_tts.voice"
             :instruction="model.qwen_tts.voice_prompt"
+            :language-type="model.qwen_tts.language_type"
             :api-key="aliyunPreviewApiKey"
             :api-url="aliyunPreviewApiURL"
             :region="model.qwen_tts.region"
@@ -157,14 +158,14 @@
       <el-form-item v-if="supportsAliyunInstruction(model.qwen_tts.model)" label="声音指令 (voice_prompt)" prop="qwen_tts.voice_prompt">
         <el-input v-model="model.qwen_tts.voice_prompt" type="textarea" placeholder="例如：年轻女性声音，语气欢快，发音清晰" :rows="2" />
       </el-form-item>
-      <el-form-item label="语种" prop="qwen_tts.language_type">
+      <el-form-item v-if="isAliyunQwenTtsModel(model.qwen_tts.model)" label="语种" prop="qwen_tts.language_type">
         <el-select v-model="model.qwen_tts.language_type" placeholder="请选择语种" style="width: 100%">
           <el-option label="自动" value="Auto" />
           <el-option label="中文" value="Chinese" />
           <el-option label="英文" value="English" />
         </el-select>
       </el-form-item>
-      <el-form-item label="音频格式" prop="qwen_tts.format">
+      <el-form-item v-if="!isAliyunQwenTtsModel(model.qwen_tts.model)" label="音频格式" prop="qwen_tts.format">
         <el-select v-model="model.qwen_tts.format" placeholder="请选择音频格式" style="width: 100%">
           <el-option label="Default" value="" />
           <el-option label="PCM" value="pcm" />
@@ -172,6 +173,9 @@
           <el-option label="MP3" value="mp3" />
           <el-option label="ogg_opus" value="ogg_opus" />
         </el-select>
+      </el-form-item>
+      <el-form-item v-else label="音频格式">
+        <span>Qwen-TTS：流式输出 PCM，非流式输出 WAV</span>
       </el-form-item>
       <el-form-item label="使用流式" prop="qwen_tts.stream">
         <el-switch v-model="model.qwen_tts.stream" />
@@ -516,7 +520,7 @@ import { ref, computed } from 'vue'
 import { TTS_PROVIDER_OPTIONS } from './ttsProviderOptions'
 import XunfeiCommonConfig from './XunfeiCommonConfig.vue'
 import VoicePreviewButton from '@/components/common/VoicePreviewButton.vue'
-import { ALIYUN_TTS_MODEL_OPTIONS, resolveAliyunAPIURL, serializeAliyunTtsConfig, supportsAliyunInstruction } from './aliyunTtsOptions'
+import { ALIYUN_TTS_MODEL_OPTIONS, isAliyunQwenTtsModel, resolveAliyunAPIURL, serializeAliyunTtsConfig, supportsAliyunInstruction } from './aliyunTtsOptions'
 
 const DOUBAO_MODEL_OPTIONS = [
   { label: '豆包语音合成 1.1', value: 'seed-tts-1.1' },

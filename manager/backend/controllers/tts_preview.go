@@ -10,8 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -36,30 +34,36 @@ func NewTTSPreviewController(db *gorm.DB) *TTSPreviewController {
 				if len(via) >= 3 {
 					return errors.New("试听请求重定向次数过多")
 				}
-				return validateAliyunPreviewURL(req.URL.String(), true)
+				if len(via) == 0 || via[0].Method != http.MethodGet {
+					return errors.New("试听 API 不允许重定向")
+				}
+				normalized, err := normalizeAliyunPreviewAudioURL(req.URL.String())
+				if err != nil {
+					return err
+				}
+				req.URL, _ = url.Parse(normalized)
+				return nil
 			},
 		},
 	}
 }
 
 type TTSPreviewRequest struct {
-	Provider    string `json:"provider"`
-	ConfigID    string `json:"config_id"`
-	Model       string `json:"model"`
-	Voice       string `json:"voice"`
-	Instruction string `json:"instruction"`
-	Text        string `json:"text"`
-	Format      string `json:"format"`
-	SampleRate  int    `json:"sample_rate"`
-	APIKey      string `json:"api_key"`
-	APIURL      string `json:"api_url"`
-	Region      string `json:"region"`
+	Provider     string `json:"provider"`
+	ConfigID     string `json:"config_id"`
+	Model        string `json:"model"`
+	Voice        string `json:"voice"`
+	Instruction  string `json:"instruction"`
+	LanguageType string `json:"language_type"`
+	Text         string `json:"text"`
+	APIKey       string `json:"api_key"`
+	APIURL       string `json:"api_url"`
+	Region       string `json:"region"`
 }
 
 const (
 	defaultAliyunPreviewAPIURLBeijing   = "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
 	defaultAliyunPreviewAPIURLSingapore = "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation"
-	defaultQwenAudioPreviewDir          = "/var/lib/xiaozhi/qwen-audio-voices"
 )
 
 type previewRequestError struct {
@@ -118,7 +122,7 @@ func (tpc *TTSPreviewController) PreviewTTS(c *gin.Context, isUserScope bool) {
 		return
 	}
 
-	c.Header("Content-Disposition", "inline; filename=\"tts_preview.mp3\"")
+	c.Header("Content-Disposition", "inline; filename=\"tts_preview.wav\"")
 	c.Data(http.StatusOK, contentType, audioBytes)
 }
 
@@ -162,6 +166,9 @@ func (tpc *TTSPreviewController) resolvePreviewRequest(req TTSPreviewRequest, is
 	if resolved.Model == "" {
 		resolved.Model = "qwen3-tts-flash"
 	}
+	if resolved.LanguageType == "" && aliyuntts.GetAliyunModelCapability(resolved.Model).SupportsLanguageType {
+		resolved.LanguageType = "Chinese"
+	}
 	if resolved.Voice == "" {
 		resolved.Voice = "Cherry"
 	}
@@ -177,7 +184,7 @@ func (tpc *TTSPreviewController) resolvePreviewRequest(req TTSPreviewRequest, is
 		return TTSPreviewRequest{}, &previewRequestError{Status: http.StatusBadRequest, Message: err.Error()}
 	}
 	resolved.APIURL = resolvedAPIURL
-	if strings.TrimSpace(resolved.APIKey) == "" && qwenTTSOfficialPreviewURL(resolved.Model, resolved.Voice) == "" {
+	if strings.TrimSpace(resolved.APIKey) == "" {
 		return TTSPreviewRequest{}, &previewRequestError{Status: http.StatusBadRequest, Message: "未配置有效的 API Key，无法试听"}
 	}
 	if err := validateAliyunPreviewURL(resolved.APIURL, false); err != nil {
@@ -197,7 +204,7 @@ func applyStoredPreviewConfig(req *TTSPreviewRequest, raw string) {
 	req.Model = strings.TrimSpace(getStringAny(data, "model"))
 	req.Voice = strings.TrimSpace(getStringAny(data, "voice"))
 	req.Instruction = strings.TrimSpace(getStringAny(data, "voice_prompt", "instructions"))
-	req.Format = strings.TrimSpace(getStringAny(data, "format"))
+	req.LanguageType = strings.TrimSpace(getStringAny(data, "language_type"))
 	if req.APIKey == "" {
 		req.APIKey = firstPreviewAPIKey(data["api_keys"])
 	}
@@ -236,20 +243,17 @@ func applyAdminPreviewOverrides(dst *TTSPreviewRequest, src TTSPreviewRequest) {
 	if value := strings.TrimSpace(src.Instruction); value != "" {
 		dst.Instruction = value
 	}
+	if value := strings.TrimSpace(src.LanguageType); value != "" {
+		dst.LanguageType = value
+	}
 	if value := strings.TrimSpace(src.Text); value != "" {
 		dst.Text = value
-	}
-	if value := strings.TrimSpace(src.Format); value != "" {
-		dst.Format = value
-	}
-	if src.SampleRate > 0 {
-		dst.SampleRate = src.SampleRate
 	}
 }
 
 func validateAliyunPreviewURL(raw string, audioURL bool) error {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" {
+	if err != nil || parsed.Scheme != "https" || parsed.User != nil || parsed.Hostname() == "" || parsed.Port() != "" || parsed.Fragment != "" {
 		return errors.New("试听地址必须是合法的 HTTPS URL")
 	}
 	host := strings.ToLower(parsed.Hostname())
@@ -257,7 +261,12 @@ func validateAliyunPreviewURL(raw string, audioURL bool) error {
 		return errors.New("试听地址不能指向内网")
 	}
 	if audioURL {
-		if host != "aliyuncs.com" && !strings.HasSuffix(host, ".aliyuncs.com") {
+		if !strings.HasSuffix(host, ".aliyuncs.com") {
+			return errors.New("试听音频地址不是允许的阿里云 OSS 域名")
+		}
+		labels := strings.Split(strings.TrimSuffix(host, ".aliyuncs.com"), ".")
+		ossLabel := labels[len(labels)-1]
+		if len(labels) > 2 || !strings.HasPrefix(ossLabel, "oss-") || (len(labels) == 2 && labels[0] == "") {
 			return errors.New("试听音频地址不是允许的阿里云域名")
 		}
 		return nil
@@ -268,15 +277,19 @@ func validateAliyunPreviewURL(raw string, audioURL bool) error {
 	return nil
 }
 
+func normalizeAliyunPreviewAudioURL(raw string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", errors.New("试听音频地址必须是合法的 HTTP(S) URL")
+	}
+	parsed.Scheme = "https"
+	if err := validateAliyunPreviewURL(parsed.String(), true); err != nil {
+		return "", err
+	}
+	return parsed.String(), nil
+}
+
 func (tpc *TTSPreviewController) previewAliyunTTS(ctx context.Context, apiKey, apiURL string, req TTSPreviewRequest) ([]byte, string, error) {
-	if officialURL := qwenTTSOfficialPreviewURL(req.Model, req.Voice); officialURL != "" {
-		return tpc.downloadPreviewAudio(ctx, officialURL)
-	}
-	if audio, found, err := loadQwenAudioOfficialPreview(req.Model, req.Voice); err != nil {
-		return nil, "", err
-	} else if found {
-		return audio, "audio/wav", nil
-	}
 	if apiURL == "" {
 		apiURL = defaultAliyunPreviewAPIURLBeijing
 	}
@@ -330,52 +343,15 @@ func (tpc *TTSPreviewController) previewAliyunTTS(ctx context.Context, apiKey, a
 	if audioURL == "" {
 		return nil, "", errors.New("阿里云试听响应缺少 output.audio.url")
 	}
-	if err := validateAliyunPreviewURL(audioURL, true); err != nil {
-		return nil, "", err
-	}
-
 	return tpc.downloadPreviewAudio(ctx, audioURL)
 }
 
-func loadQwenAudioOfficialPreview(model, voice string) ([]byte, bool, error) {
-	if aliyuntts.GetAliyunModelCapability(model).Category != aliyuntts.CategoryQwenAudio {
-		return nil, false, nil
-	}
-	prefix := strings.TrimSpace(model) + "-"
-	if !strings.HasPrefix(voice, prefix) {
-		return nil, false, nil
-	}
-	name := strings.TrimPrefix(voice, prefix)
-	if name == "" || strings.ContainsAny(name, `/\\`) || filepath.Base(name) != name {
-		return nil, false, errors.New("Qwen-Audio 试听音色参数不合法")
-	}
-	dir := strings.TrimSpace(os.Getenv("XIAOZHI_QWEN_AUDIO_PREVIEW_DIR"))
-	if dir == "" {
-		dir = defaultQwenAudioPreviewDir
-	}
-	path := filepath.Join(dir, name+".wav")
-	info, err := os.Stat(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, fmt.Errorf("读取 Qwen-Audio 官方试听音频失败: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 20*1024*1024 {
-		return nil, false, errors.New("Qwen-Audio 官方试听音频文件无效")
-	}
-	audio, err := os.ReadFile(path)
-	if err != nil {
-		return nil, false, fmt.Errorf("读取 Qwen-Audio 官方试听音频失败: %w", err)
-	}
-	return audio, true, nil
-}
-
 func (tpc *TTSPreviewController) downloadPreviewAudio(ctx context.Context, audioURL string) ([]byte, string, error) {
-	if err := validateAliyunPreviewURL(audioURL, true); err != nil {
+	normalizedURL, err := normalizeAliyunPreviewAudioURL(audioURL)
+	if err != nil {
 		return nil, "", err
 	}
-	audioReq, err := http.NewRequestWithContext(ctx, http.MethodGet, audioURL, nil)
+	audioReq, err := http.NewRequestWithContext(ctx, http.MethodGet, normalizedURL, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("创建试听音频下载请求失败: %w", err)
 	}
@@ -385,7 +361,7 @@ func (tpc *TTSPreviewController) downloadPreviewAudio(ctx context.Context, audio
 	}
 	defer audioResp.Body.Close()
 
-	audioBytes, err := io.ReadAll(io.LimitReader(audioResp.Body, 20*1024*1024))
+	audioBytes, err := io.ReadAll(io.LimitReader(audioResp.Body, 20*1024*1024+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("读取试听音频失败: %w", err)
 	}
@@ -395,12 +371,13 @@ func (tpc *TTSPreviewController) downloadPreviewAudio(ctx context.Context, audio
 	if len(audioBytes) == 0 {
 		return nil, "", errors.New("试听返回音频为空")
 	}
-
-	contentType := strings.TrimSpace(audioResp.Header.Get("Content-Type"))
-	if contentType == "" {
-		contentType = "audio/mpeg"
+	if len(audioBytes) > 20*1024*1024 {
+		return nil, "", errors.New("试听音频超过 20MB 限制")
 	}
-	return audioBytes, contentType, nil
+	if len(audioBytes) < 12 || !bytes.HasPrefix(audioBytes, []byte("RIFF")) || !bytes.Equal(audioBytes[8:12], []byte("WAVE")) {
+		return nil, "", errors.New("试听返回的音频不是 WAV 格式")
+	}
+	return audioBytes, "audio/wav", nil
 }
 
 func buildAliyunPreviewRequestBody(req TTSPreviewRequest) map[string]any {
@@ -424,35 +401,17 @@ func buildAliyunPreviewRequestBody(req TTSPreviewRequest) map[string]any {
 		if instruction != "" && capability.SupportsInstruction {
 			inputMap["instruction"] = instruction
 		}
-		format := strings.TrimSpace(req.Format)
-		if format == "" {
-			format = "wav"
-		}
-		inputMap["format"] = aliyunPreviewAPIFormat(format)
-		sampleRate := req.SampleRate
-		if sampleRate <= 0 {
-			sampleRate = capability.DefaultSampleRate
-		}
-		inputMap["sample_rate"] = sampleRate
+		// 试听统一请求 WAV，与浏览器返回的音频容器一致；不沿用设备播放格式。
+		inputMap["format"] = "wav"
+		inputMap["sample_rate"] = capability.DefaultSampleRate
 	} else {
 		if instruction != "" && capability.SupportsInstruction {
 			inputMap["instructions"] = instruction
 			inputMap["optimize_instructions"] = true
 		}
-		if req.Format != "" {
-			inputMap["format"] = aliyunPreviewAPIFormat(req.Format)
-		}
-		if req.SampleRate > 0 {
-			inputMap["sample_rate"] = req.SampleRate
+		if languageType := strings.TrimSpace(req.LanguageType); languageType != "" {
+			inputMap["language_type"] = languageType
 		}
 	}
 	return map[string]any{"model": model, "input": inputMap}
-}
-
-func aliyunPreviewAPIFormat(format string) string {
-	format = strings.ToLower(strings.TrimSpace(format))
-	if format == "ogg_opus" {
-		return "opus"
-	}
-	return format
 }

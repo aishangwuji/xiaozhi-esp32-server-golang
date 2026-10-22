@@ -1,22 +1,16 @@
 package middleware
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 )
-
-// min 函数用于获取两个整数的最小值
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 type Claims struct {
 	UserID   uint   `json:"user_id"`
@@ -25,28 +19,55 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-var jwtSecret = []byte("xiaozhi_admin_secret_key")
+type signingConfig struct {
+	secret []byte
+	expiry time.Duration
+}
+
+var currentSigningConfig atomic.Pointer[signingConfig]
+
+func ConfigureJWT(secret string, expireHour int) error {
+	if strings.TrimSpace(secret) == "" {
+		return errors.New("JWT secret is empty")
+	}
+	if expireHour <= 0 {
+		expireHour = 24
+	}
+	currentSigningConfig.Store(&signingConfig{
+		secret: []byte(secret),
+		expiry: time.Duration(expireHour) * time.Hour,
+	})
+	return nil
+}
 
 // 生成JWT Token
 func GenerateToken(userID uint, username, role string) (string, error) {
+	config := currentSigningConfig.Load()
+	if config == nil {
+		return "", errors.New("JWT signing is not configured")
+	}
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
 		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(config.expiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(jwtSecret)
+	return token.SignedString(config.secret)
 }
 
 // 解析JWT Token
 func ParseToken(tokenString string) (*Claims, error) {
+	config := currentSigningConfig.Load()
+	if config == nil {
+		return nil, errors.New("JWT signing is not configured")
+	}
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
+		return config.secret, nil
 	})
 
 	if err != nil {
@@ -65,10 +86,9 @@ func JWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 添加调试日志
 		log.Printf("[JWTAuth] 处理请求: %s %s, 客户端IP: %s", c.Request.Method, c.Request.URL.Path, c.ClientIP())
-		
+
 		authHeader := c.GetHeader("Authorization")
-		log.Printf("[JWTAuth] Authorization头: %s", authHeader)
-		
+
 		if authHeader == "" {
 			log.Printf("[JWTAuth] ❌ 缺少认证头")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "缺少认证头"})
@@ -77,8 +97,7 @@ func JWTAuth() gin.HandlerFunc {
 		}
 
 		tokenString := strings.Replace(authHeader, "Bearer ", "", 1)
-		log.Printf("[JWTAuth] 提取的token长度: %d, 前缀: %s", len(tokenString), tokenString[:min(20, len(tokenString))])
-		
+
 		claims, err := ParseToken(tokenString)
 		if err != nil {
 			log.Printf("[JWTAuth] ❌ token解析失败: %v", err)

@@ -136,6 +136,7 @@ const formRef = ref()
 // 音色列表相关
 const voiceOptions = ref([])
 const voiceLoading = ref(false)
+let voiceRequestId = 0
 
 const form = reactive({
   name: '',
@@ -160,7 +161,7 @@ const form = reactive({
     voice: 'Cherry',
     voice_prompt: '',
     language_type: 'Chinese',
-    format: 'ogg_opus',
+    format: 'pcm',
     stream: true,
     frame_duration: 60
   },
@@ -354,9 +355,6 @@ const editConfig = (config) => {
   form.is_default = config.is_default
   form.enabled = config.enabled
   form.double_stream = false
-
-  // IndexTTS 改为点击音色下拉时再请求
-  loadVoiceOptions(config.provider)
 
   // 解析配置JSON并填充到对应的表单字段
   try {
@@ -711,7 +709,7 @@ const resetForm = () => {
       voice: 'Cherry',
       voice_prompt: '',
       language_type: 'Chinese',
-      format: 'ogg_opus',
+      format: 'pcm',
       stream: true,
       frame_duration: 60
     },
@@ -843,21 +841,26 @@ const formatDate = (dateString) => {
 
 // 加载音色列表
 const loadVoiceOptions = async (provider, options = {}) => {
+  const requestId = ++voiceRequestId
+  if (!showDialog.value) return
   const trigger = options?.trigger || 'auto'
   if (!provider) {
     voiceOptions.value = []
+    voiceLoading.value = false
     return
   }
 
   // IndexTTS 仅在下拉展开时请求
   if (provider === 'indextts_vllm' && trigger !== 'dropdown') {
     voiceOptions.value = []
+    voiceLoading.value = false
     return
   }
   
   // 只有这些 provider 需要从后端获取音色列表
   if (!TTS_PROVIDERS_WITH_VOICES.includes(provider)) {
     voiceOptions.value = []
+    voiceLoading.value = false
     return
   }
   
@@ -884,16 +887,18 @@ const loadVoiceOptions = async (provider, options = {}) => {
     const response = await api.get(`/user/voice-options`, {
       params
     })
+    if (requestId !== voiceRequestId || !showDialog.value) return
     const nextOptions = response.data.data || []
     voiceOptions.value = nextOptions
     if (provider === 'aliyun_qwen') {
       form.qwen_tts.voice = reconcileAliyunVoice(previousOptions, nextOptions, form.qwen_tts.voice)
     }
   } catch (error) {
+    if (requestId !== voiceRequestId || !showDialog.value) return
     console.error('加载音色列表失败:', error)
     voiceOptions.value = []
   } finally {
-    voiceLoading.value = false
+    if (requestId === voiceRequestId) voiceLoading.value = false
   }
 }
 
@@ -919,6 +924,9 @@ watch(() => form.qwen_tts.model, (newModel) => {
 watch(showDialog, (isOpen) => {
   if (isOpen && form.provider) {
     nextTick(() => loadVoiceOptions(form.provider))
+  } else if (!isOpen) {
+    voiceRequestId++
+    voiceLoading.value = false
   }
 })
 

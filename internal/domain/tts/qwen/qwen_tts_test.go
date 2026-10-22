@@ -2,12 +2,15 @@ package qwen
 
 import (
 	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/binary"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 
 	"xiaozhi-esp32-server-golang/internal/data/audio"
-	"xiaozhi-esp32-server-golang/internal/domain/emotion"
 )
 
 func TestNewQwenTTSProviderDefaultsAndSetVoice(t *testing.T) {
@@ -89,36 +92,22 @@ func TestCleanBase64RemovesWhitespace(t *testing.T) {
 	}
 }
 
-func TestQwenRequestParamsForOpusOnlyOnStreamingFlashModel(t *testing.T) {
-	params := qwenRequestParamsFor("qwen3-tts-flash", "opus", true)
-	if params == nil || params.ResponseFormat != "opus" {
-		t.Fatalf("qwen3 flash opus params = %#v", params)
+func TestQwenDecoderFormatMatchesActualHTTPOutput(t *testing.T) {
+	tests := []struct {
+		model, format string
+		stream        bool
+		want          string
+	}{
+		{"qwen3-tts-flash", "ogg_opus", true, "pcm"},
+		{"qwen3-tts-instruct-flash", "mp3", false, "wav"},
+		{"qwen-audio-3.0-tts-flash", "ogg_opus", true, "ogg_opus"},
+		{"cosyvoice-v3-flash", "mp3", false, "mp3"},
+		{"cosyvoice-v3-flash", "", false, "wav"},
 	}
-
-	if params := qwenRequestParamsFor("qwen3-tts-instruct-flash", "opus", true); params != nil {
-		t.Fatalf("instruct model should not send opus response_format: %#v", params)
-	}
-
-	if params := qwenRequestParamsFor("qwen3-tts-flash", "opus", false); params != nil {
-		t.Fatalf("non-streaming should not send opus response_format: %#v", params)
-	}
-}
-
-func TestQwenStreamDecoderFormatMatchesRequestedAudio(t *testing.T) {
-	if got := qwenStreamDecoderFormat("qwen3-tts-flash", "opus"); got != "opus" {
-		t.Fatalf("flash opus decoder format = %q", got)
-	}
-	if got := qwenStreamDecoderFormat("qwen-audio-3.0-tts-flash", "ogg_opus"); got != "ogg_opus" {
-		t.Fatalf("qwen audio ogg opus decoder format = %q", got)
-	}
-	if got := qwenStreamDecoderFormat("cosyvoice-v3-flash", "ogg_opus"); got != "ogg_opus" {
-		t.Fatalf("cosyvoice ogg opus decoder format = %q", got)
-	}
-	if got := qwenStreamDecoderFormat("qwen3-tts-instruct-flash", "opus"); got != "opus" {
-		t.Fatalf("instruct opus decoder format = %q", got)
-	}
-	if got := qwenStreamDecoderFormat("qwen3-tts-flash", ""); got != "pcm" {
-		t.Fatalf("empty decoder format = %q", got)
+	for _, tt := range tests {
+		if got := qwenDecoderFormat(tt.model, tt.format, tt.stream); got != tt.want {
+			t.Fatalf("qwenDecoderFormat(%q, %q, %v) = %q, want %q", tt.model, tt.format, tt.stream, got, tt.want)
+		}
 	}
 }
 
@@ -139,13 +128,7 @@ func TestPrepareQwenHTTPRequestUsesSpeechSynthesizerFieldsForQwenAudio(t *testin
 		Instructions:         "warm voice",
 		OptimizeInstructions: true,
 	}
-	params, err := prepareQwenHTTPRequest("qwen-audio-3.0-tts-flash", "ogg_opus", false, &input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if params != nil {
-		t.Fatalf("parameters = %#v, want nil", params)
-	}
+	prepareQwenHTTPRequest("qwen-audio-3.0-tts-flash", "ogg_opus", false, &input)
 	if input.Instruction != "warm voice" || input.Instructions != "" || input.OptimizeInstructions {
 		t.Fatalf("instruction fields = %#v", input)
 	}
@@ -156,123 +139,36 @@ func TestPrepareQwenHTTPRequestUsesSpeechSynthesizerFieldsForQwenAudio(t *testin
 
 func TestPrepareQwenHTTPRequestKeepsQwenTTSProtocol(t *testing.T) {
 	input := qwenRequestInput{Text: "hello", Voice: "Cherry", LanguageType: "Chinese", Instructions: "warm voice", OptimizeInstructions: true}
-	params, err := prepareQwenHTTPRequest("qwen3-tts-instruct-flash", "wav", false, &input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if params != nil {
-		t.Fatalf("parameters = %#v, want nil", params)
-	}
+	prepareQwenHTTPRequest("qwen3-tts-instruct-flash", "ogg_opus", true, &input)
 	if input.Instructions != "warm voice" || input.Instruction != "" || input.Format != "" || input.SampleRate != 0 {
 		t.Fatalf("Qwen-TTS input changed protocol: %#v", input)
 	}
 }
 
-func TestBuildQwenInstructionUsesDetailedVoiceDirections(t *testing.T) {
-	tests := []struct {
-		name     string
-		emotion  emotion.Emotion
-		contains []string
-	}{
-		{
-			name:     "angry",
-			emotion:  emotion.EmotionAngry,
-			contains: []string{"明显带怒意", "压迫感", "不要破音或失真"},
-		},
-		{
-			name:     "sad",
-			emotion:  emotion.EmotionSad,
-			contains: []string{"明显哭腔", "轻微哽咽", "不要尖叫或失真"},
-		},
-		{
-			name:     "warm",
-			emotion:  emotion.EmotionWarm,
-			contains: []string{"语速稍慢", "自然停顿", "安静陪伴"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			instruction := buildQwenInstruction(emotion.GetEmotionConfig(tt.emotion))
-			for _, want := range tt.contains {
-				if !strings.Contains(instruction, want) {
-					t.Fatalf("instruction %q does not contain %q", instruction, want)
-				}
-			}
-		})
-	}
-
-	if instruction := buildQwenInstruction(emotion.GetEmotionConfig(emotion.EmotionNeutral)); instruction != "" {
-		t.Fatalf("neutral instruction = %q, want empty", instruction)
-	}
-}
-
-func TestApplyQwenExpressionUsesModelCapabilities(t *testing.T) {
-	happy := emotion.GetEmotionConfig(emotion.EmotionHappy)
-	neutral := emotion.GetEmotionConfig(emotion.EmotionNeutral)
-
+func TestApplyQwenVoicePromptUsesModelCapabilities(t *testing.T) {
 	tests := []struct {
 		name             string
 		model            string
 		voicePrompt      string
-		emotion          *emotion.EmotionConfig
 		wantModel        string
 		wantInstructions string
-		wantText         string
 	}{
-		{name: "qwen flash upgrades for emotion", model: "qwen3-tts-flash", emotion: &happy, wantModel: "qwen3-tts-instruct-flash", wantInstructions: buildQwenInstruction(happy), wantText: "hello"},
-		{name: "neutral emotion keeps qwen flash", model: "qwen3-tts-flash", emotion: &neutral, wantModel: "qwen3-tts-flash", wantText: "hello"},
-		{name: "qwen instruct uses explicit prompt", model: "qwen3-tts-instruct-flash", voicePrompt: "warm voice", wantModel: "qwen3-tts-instruct-flash", wantInstructions: "warm voice", wantText: "hello"},
-		{name: "qwen audio uses official inline emotion", model: "qwen-audio-3.0-tts-flash", emotion: &happy, wantModel: "qwen-audio-3.0-tts-flash", wantText: "[excited]hello"},
-		{name: "qwen audio combines instruction and inline emotion", model: "qwen-audio-3.0-tts-flash", voicePrompt: "warm voice", emotion: &happy, wantModel: "qwen-audio-3.0-tts-flash", wantInstructions: "warm voice", wantText: "[excited]hello"},
-		{name: "aliyun cosyvoice ignores qwen audio emotion tags", model: "cosyvoice-v3-flash", voicePrompt: "warm voice", emotion: &happy, wantModel: "cosyvoice-v3-flash", wantText: "hello"},
-		{name: "unknown model stays conservative", model: "custom-tts", voicePrompt: "warm voice", emotion: &happy, wantModel: "custom-tts", wantText: "hello"},
+		{name: "qwen flash upgrades for voice prompt", model: "qwen3-tts-flash", voicePrompt: "warm voice", wantModel: "qwen3-tts-instruct-flash", wantInstructions: "warm voice"},
+		{name: "qwen flash stays unchanged without prompt", model: "qwen3-tts-flash", wantModel: "qwen3-tts-flash"},
+		{name: "qwen instruct uses prompt", model: "qwen3-tts-instruct-flash", voicePrompt: "warm voice", wantModel: "qwen3-tts-instruct-flash", wantInstructions: "warm voice"},
+		{name: "qwen audio uses prompt", model: "qwen-audio-3.0-tts-flash", voicePrompt: "warm voice", wantModel: "qwen-audio-3.0-tts-flash", wantInstructions: "warm voice"},
+		{name: "cosyvoice ignores unsupported prompt", model: "cosyvoice-v3-flash", voicePrompt: "warm voice", wantModel: "cosyvoice-v3-flash"},
+		{name: "unknown model stays conservative", model: "custom-tts", voicePrompt: "warm voice", wantModel: "custom-tts"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			input := qwenRequestInput{Text: "hello", Voice: "Cherry"}
-			gotModel := applyQwenExpression(tt.model, &input, tt.voicePrompt, tt.emotion)
-			if gotModel != tt.wantModel || input.Instructions != tt.wantInstructions || input.Text != tt.wantText {
+			gotModel := applyQwenVoicePrompt(tt.model, &input, tt.voicePrompt)
+			if gotModel != tt.wantModel || input.Instructions != tt.wantInstructions || input.Text != "hello" {
 				t.Fatalf("model=%q input=%#v", gotModel, input)
 			}
 		})
-	}
-}
-
-func TestQwenInlineEmotionTagUsesOfficialQwenAudioTags(t *testing.T) {
-	tests := []struct {
-		emotion emotion.Emotion
-		want    string
-	}{
-		{emotion.EmotionHappy, "[excited]"},
-		{emotion.EmotionComfort, "[empathetic]"},
-		{emotion.EmotionSerious, "[serious]"},
-		{emotion.EmotionCurious, "[curious]"},
-		{emotion.EmotionAmazed, "[amazed]"},
-		{emotion.EmotionDeepShout, "[deep and loud shouting]"},
-		{emotion.EmotionTrembling, "[trembling]"},
-		{emotion.EmotionSarcastic, "[sarcastic]"},
-		{emotion.EmotionDracula, "[like dracula]"},
-		{emotion.EmotionBored, "[bored]"},
-		{emotion.EmotionTired, "[tired]"},
-		{emotion.EmotionScornful, "[scornful]"},
-		{emotion.EmotionShouting, "[shouting]"},
-		{emotion.EmotionASMR, "[asmr]"},
-		{emotion.EmotionPanicked, "[panicked]"},
-		{emotion.EmotionMischievous, "[mischievously]"},
-		{emotion.EmotionWhisper, "[whispers]"},
-		{emotion.EmotionReluctant, "[reluctantly]"},
-		{emotion.EmotionCrying, "[crying]"},
-		{emotion.EmotionVerySlow, "[very slowly]"},
-		{emotion.EmotionVeryFast, "[very fast]"},
-		{emotion.EmotionNeutral, ""},
-	}
-
-	for _, tt := range tests {
-		if got := qwenInlineEmotionTag(tt.emotion); got != tt.want {
-			t.Fatalf("qwenInlineEmotionTag(%v) = %q, want %q", tt.emotion, got, tt.want)
-		}
 	}
 }
 
@@ -307,6 +203,33 @@ func TestNormalizeLeadingQwenAudioKeepsPCM(t *testing.T) {
 	}
 	if !bytes.Equal(normalized, pcm) {
 		t.Fatalf("normalized = %v", normalized)
+	}
+}
+
+func TestParseEventStreamPreservesWAVOnlyForWAVDecoder(t *testing.T) {
+	pcm := []byte{1, 2, 3, 4}
+	wav := makeTestWAV(pcm)
+	stream := fmt.Sprintf("data: {\"output\":{\"audio\":{\"data\":%q},\"finish_reason\":\"stop\"}}\n\n", base64.StdEncoding.EncodeToString(wav))
+	for _, tt := range []struct {
+		format string
+		want   []byte
+	}{{"wav", wav}, {"pcm", pcm}} {
+		t.Run(tt.format, func(t *testing.T) {
+			reader, writer := io.Pipe()
+			result := make(chan []byte, 1)
+			go func() {
+				data, _ := io.ReadAll(reader)
+				result <- data
+			}()
+			err := (&QwenTTSProvider{}).parseEventStream(context.Background(), strings.NewReader(stream), writer, "test", tt.format)
+			writer.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := <-result; !bytes.Equal(got, tt.want) {
+				t.Fatalf("decoded stream = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

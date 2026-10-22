@@ -30,6 +30,10 @@ export function supportsAliyunInstruction(model) {
   return normalized.startsWith('qwen-audio-') || (normalized.startsWith('qwen3-tts-') && normalized.includes('instruct'))
 }
 
+export function isAliyunQwenTtsModel(model) {
+  return /^(qwen3-tts|qwen-tts)/i.test(String(model || '').trim())
+}
+
 export function normalizeAliyunTtsConfig(data = {}) {
   const { instructions, ...rest } = data || {}
   return {
@@ -48,10 +52,10 @@ export function serializeAliyunTtsConfig(data = {}) {
     model,
     voice: rest.voice || 'Cherry',
     frame_duration: rest.frame_duration || 60,
-    format: rest.format || 'ogg_opus',
+    format: isAliyunQwenTtsModel(model) ? (rest.stream ? 'pcm' : 'wav') : (rest.format || 'ogg_opus'),
     voice_prompt: String(rest.voice_prompt || '')
   }
-  if (/^(qwen3-tts|qwen-tts)/i.test(model)) result.language_type = language_type || 'Chinese'
+  if (isAliyunQwenTtsModel(model)) result.language_type = language_type || 'Chinese'
   return result
 }
 
@@ -61,6 +65,6 @@ export function reconcileAliyunVoice(previousOptions, nextOptions, currentVoice)
   const next = Array.isArray(nextOptions) ? nextOptions : []
   const nextValues = new Set(next.map((item) => String(item?.value || '').trim()))
 
-  if (!current || nextValues.has(current) || !previousValues.has(current)) return current
+  if (!current || nextValues.has(current) || (!previousValues.has(current) && current !== 'Cherry')) return current
   return String(next[0]?.value || '')
 }

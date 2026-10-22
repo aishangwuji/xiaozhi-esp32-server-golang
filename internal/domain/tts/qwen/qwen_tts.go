@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"xiaozhi-esp32-server-golang/internal/data/audio"
-	"xiaozhi-esp32-server-golang/internal/domain/emotion"
 	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
 	"xiaozhi-esp32-server-golang/pkg/aliyuntts"
@@ -76,9 +75,8 @@ type QwenTTSProvider struct {
 
 // qwenRequest 请求结构体
 type qwenRequest struct {
-	Model      string             `json:"model"`
-	Input      qwenRequestInput   `json:"input"`
-	Parameters *qwenRequestParams `json:"parameters,omitempty"`
+	Model string           `json:"model"`
+	Input qwenRequestInput `json:"input"`
 }
 
 type qwenRequestInput struct {
@@ -90,10 +88,6 @@ type qwenRequestInput struct {
 	Instruction          string `json:"instruction,omitempty"`
 	Format               string `json:"format,omitempty"`
 	SampleRate           int    `json:"sample_rate,omitempty"`
-}
-
-type qwenRequestParams struct {
-	ResponseFormat string `json:"response_format,omitempty"`
 }
 
 // qwenResponse 非流式/流式统一响应结构
@@ -185,45 +179,21 @@ func NewQwenTTSProvider(config map[string]interface{}) *QwenTTSProvider {
 	}
 }
 
-func buildQwenInstruction(cfg emotion.EmotionConfig) string {
-	if prompt := emotion.GetVoicePromptForEmotion(cfg.Emotion); prompt != "" {
-		return prompt
-	}
-	if cfg.VoiceStyle != "" && cfg.VoiceStyle != "default" {
-		return fmt.Sprintf("用%s的语气朗读", cfg.VoiceStyle)
-	}
-	return ""
-}
-
-func qwenSupportsAudioResponseFormat(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	if model == "" {
-		return false
-	}
-	if strings.Contains(model, "instruct") {
-		return false
-	}
-	return strings.HasPrefix(model, "qwen3-tts-flash")
-}
-
-func qwenRequestParamsFor(model string, format string, stream bool) *qwenRequestParams {
-	format = qwenAPIAudioFormat(format)
-	if format == "" || format == "pcm" || format == "wav" {
-		return nil
-	}
-	if format == "opus" {
-		if stream && qwenSupportsAudioResponseFormat(model) {
-			return &qwenRequestParams{ResponseFormat: format}
+func qwenDecoderFormat(model string, format string, stream bool) string {
+	// Qwen-TTS HTTP API 的流式数据是 PCM，非流式 URL 是 WAV；旧配置中的
+	// ogg_opus/mp3 不能改变服务端返回格式，解码器必须跟实际输出一致。
+	if aliyuntts.GetAliyunModelCapability(model).Category == aliyuntts.CategoryQwenTTS {
+		if stream {
+			return "pcm"
 		}
-		return nil
+		return "wav"
 	}
-	return &qwenRequestParams{ResponseFormat: format}
-}
-
-func qwenStreamDecoderFormat(model string, format string) string {
 	format = strings.ToLower(strings.TrimSpace(format))
 	if format == "" {
-		return "pcm"
+		if stream {
+			return "pcm"
+		}
+		return "wav"
 	}
 	return format
 }
@@ -236,10 +206,11 @@ func qwenAPIAudioFormat(format string) string {
 	return format
 }
 
-func prepareQwenHTTPRequest(model, format string, stream bool, input *qwenRequestInput) (*qwenRequestParams, error) {
+func prepareQwenHTTPRequest(model, format string, stream bool, input *qwenRequestInput) {
 	capability := aliyuntts.GetAliyunModelCapability(model)
 	if capability.Category != aliyuntts.CategoryQwenAudio && capability.Category != aliyuntts.CategoryCosyVoice {
-		return qwenRequestParamsFor(model, format, stream), nil
+		// Qwen-TTS HTTP 接口不接受 SpeechSynthesizer 的格式字段。
+		return
 	}
 
 	input.LanguageType = ""
@@ -255,13 +226,11 @@ func prepareQwenHTTPRequest(model, format string, stream bool, input *qwenReques
 		}
 	}
 	input.SampleRate = capability.DefaultSampleRate
-	return nil, nil
 }
 
-func applyQwenExpression(model string, input *qwenRequestInput, voicePrompt string, emoCfg *emotion.EmotionConfig) string {
+func applyQwenVoicePrompt(model string, input *qwenRequestInput, voicePrompt string) string {
 	capability := aliyuntts.GetAliyunModelCapability(model)
-	hasEmotionInstruction := emoCfg != nil && buildQwenInstruction(*emoCfg) != ""
-	if capability.Category == aliyuntts.CategoryQwenTTS && !capability.SupportsInstruction && model == defaultQwenModel && (voicePrompt != "" || hasEmotionInstruction) {
+	if capability.Category == aliyuntts.CategoryQwenTTS && !capability.SupportsInstruction && model == defaultQwenModel && voicePrompt != "" {
 		model = "qwen3-tts-instruct-flash"
 		capability = aliyuntts.GetAliyunModelCapability(model)
 	}
@@ -269,33 +238,8 @@ func applyQwenExpression(model string, input *qwenRequestInput, voicePrompt stri
 	if voicePrompt != "" && capability.SupportsInstruction {
 		input.Instructions = voicePrompt
 		input.OptimizeInstructions = true
-		if capability.EmotionMode != aliyuntts.EmotionInlineTag {
-			return model
-		}
-	}
-	if emoCfg == nil {
-		return model
-	}
-
-	switch capability.EmotionMode {
-	case aliyuntts.EmotionInstruction:
-		if capability.SupportsInstruction {
-			input.Instructions = buildQwenInstruction(*emoCfg)
-			input.OptimizeInstructions = input.Instructions != ""
-		}
-	case aliyuntts.EmotionInlineTag:
-		if tag := qwenInlineEmotionTag(emoCfg.Emotion); tag != "" {
-			input.Text = tag + input.Text
-		}
 	}
 	return model
-}
-
-func qwenInlineEmotionTag(value emotion.Emotion) string {
-	if tag := emotion.GetInlineTagForEmotion(value); tag != "" {
-		return tag
-	}
-	return ""
 }
 
 // TextToSpeech 非流式文本转语音：调用 HTTP 接口，下载 WAV 并解码为帧
@@ -307,19 +251,11 @@ func (p *QwenTTSProvider) TextToSpeech(ctx context.Context, text string, sampleR
 		Voice:        p.Voice,
 		LanguageType: p.LanguageType,
 	}
-	var emoCfg *emotion.EmotionConfig
-	if value, ok := emotion.FromContext(ctx); ok {
-		emoCfg = &value
-	}
-	model := applyQwenExpression(p.Model, &input, p.VoicePrompt, emoCfg)
-	parameters, err := prepareQwenHTTPRequest(model, p.Format, false, &input)
-	if err != nil {
-		return nil, err
-	}
+	model := applyQwenVoicePrompt(p.Model, &input, p.VoicePrompt)
+	prepareQwenHTTPRequest(model, p.Format, false, &input)
 	reqBody := qwenRequest{
-		Model:      model,
-		Input:      input,
-		Parameters: parameters,
+		Model: model,
+		Input: input,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -376,25 +312,37 @@ func (p *QwenTTSProvider) TextToSpeech(ctx context.Context, text string, sampleR
 		return nil, fmt.Errorf("下载音频文件失败: %v", err)
 	}
 	defer audioResp.Body.Close()
+	if audioResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("下载音频文件失败: HTTP %d", audioResp.StatusCode)
+	}
 
 	outputChan := make(chan []byte, 1000)
 
-	decoderFormat := qwenStreamDecoderFormat(model, p.Format)
+	decoderFormat := qwenDecoderFormat(model, p.Format, false)
 	decoder, err := util.CreateAudioDecoderWithSampleRate(ctx, audioResp.Body, outputChan, frameDuration, decoderFormat, sampleRate)
 	if err != nil {
 		return nil, fmt.Errorf("创建千问音频解码器失败: %v", err)
 	}
 
 	// 启动解码
+	decodeResult := make(chan error, 1)
 	go func() {
-		if err := decoder.Run(startTs); err != nil {
-			log.Errorf("千问 TTS 非流式音频解码失败: %v", err)
+		decodeErr := decoder.Run(startTs)
+		if decodeErr != nil {
+			log.Errorf("千问 TTS 非流式音频解码失败: %v", decodeErr)
 		}
+		decodeResult <- decodeErr
 	}()
 
 	var frames [][]byte
 	for frame := range outputChan {
 		frames = append(frames, frame)
+	}
+	if err := <-decodeResult; err != nil {
+		return nil, fmt.Errorf("千问 TTS 非流式音频解码失败: %w", err)
+	}
+	if len(frames) == 0 {
+		return nil, fmt.Errorf("千问 TTS 非流式音频为空")
 	}
 
 	log.Debugf("千问 TTS 非流式完成，从输入到获取音频数据结束耗时: %d ms", time.Now().UnixMilli()-startTs)
@@ -411,24 +359,11 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 		Voice:        p.Voice,
 		LanguageType: p.LanguageType,
 	}
-	var emoCfg *emotion.EmotionConfig
-	if value, ok := emotion.FromContext(ctx); ok {
-		emoCfg = &value
-	}
-	model := applyQwenExpression(p.Model, &input, p.VoicePrompt, emoCfg)
-	if emoCfg != nil {
-		log.Infof("[QwenTTS] 从 Context 识别情绪: emotion=%v, voice_style=%s, instruction=%q, model=%s", emoCfg.Emotion, emoCfg.VoiceStyle, input.Instructions, model)
-	} else {
-		log.Infof("[QwenTTS] Context 未包含情绪配置, 使用默认模型: %s", model)
-	}
-	parameters, err := prepareQwenHTTPRequest(model, p.Format, true, &input)
-	if err != nil {
-		return nil, err
-	}
+	model := applyQwenVoicePrompt(p.Model, &input, p.VoicePrompt)
+	prepareQwenHTTPRequest(model, p.Format, true, &input)
 	reqBody := qwenRequest{
-		Model:      model,
-		Input:      input,
-		Parameters: parameters,
+		Model: model,
+		Input: input,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -482,7 +417,8 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 		pipeReader, pipeWriter := io.Pipe()
 
 		// 解析 SSE，写入原始音频数据。
-		// Qwen 流式返回的 audio.data 在实测中可能携带一次 WAV 头，需先剥离再按 PCM 处理。
+		// PCM 数据偶尔携带 WAV 头；仅 PCM 解码时剥离，其他格式保留原始容器。
+		decoderFormat := qwenDecoderFormat(model, p.Format, true)
 		go func() {
 			defer func() {
 				if err := pipeWriter.Close(); err != nil {
@@ -490,12 +426,10 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 				}
 			}()
 
-			if err := p.parseEventStream(ctx, resp.Body, pipeWriter, text); err != nil {
+			if err := p.parseEventStream(ctx, resp.Body, pipeWriter, text, decoderFormat); err != nil {
 				log.Errorf("解析千问 Event Stream 失败: %v", err)
 			}
 		}()
-
-		decoderFormat := qwenStreamDecoderFormat(model, p.Format)
 
 		// 创建音频解码器，从管道读取 PCM/Opus，输出 opus 帧
 		decoder, err := util.CreateAudioDecoderWithSampleRate(
@@ -540,8 +474,8 @@ func (p *QwenTTSProvider) TextToSpeechStream(ctx context.Context, text string, s
 	return outputChan, nil
 }
 
-// parseEventStream 使用 go-sse 解析阿里云千问的 SSE，解码 Base64 PCM 并写入管道
-func (p *QwenTTSProvider) parseEventStream(ctx context.Context, reader io.Reader, writer *io.PipeWriter, text string) error {
+// parseEventStream 解析阿里云 SSE，将 Base64 音频数据写入解码管道。
+func (p *QwenTTSProvider) parseEventStream(ctx context.Context, reader io.Reader, writer *io.PipeWriter, text, decoderFormat string) error {
 	var leadingAudio bytes.Buffer
 	wroteLeadingAudio := false
 
@@ -573,7 +507,7 @@ func (p *QwenTTSProvider) parseEventStream(ctx context.Context, reader io.Reader
 			return fmt.Errorf("千问流式 API 错误 [%s]: %s", eventResp.Code, eventResp.Message)
 		}
 
-		// 解码 Base64 PCM 数据
+		// 解码 Base64 音频数据
 		if eventResp.Output.Audio.Data != "" {
 			encoded := cleanBase64(eventResp.Output.Audio.Data)
 			audioBytes, err := base64.StdEncoding.DecodeString(encoded)
@@ -583,7 +517,7 @@ func (p *QwenTTSProvider) parseEventStream(ctx context.Context, reader io.Reader
 			}
 
 			if len(audioBytes) > 0 {
-				if !wroteLeadingAudio {
+				if decoderFormat == "pcm" && !wroteLeadingAudio {
 					leadingAudio.Write(audioBytes)
 					normalized, needMore, detectedWAV, err := normalizeLeadingQwenAudio(leadingAudio.Bytes())
 					if err != nil {
