@@ -25,6 +25,11 @@ type VadConfig struct {
 	Config   map[string]interface{} `json:"config"`
 }
 
+type RealtimeConfig struct {
+	Provider string                 `json:"provider"`
+	Config   map[string]interface{} `json:"config"`
+}
+
 type ConfigItem struct {
 	Provider string                 `json:"provider"`
 	JsonData map[string]interface{} `json:"json_data"`
@@ -65,6 +70,8 @@ type UConfig struct {
 	Tts             TtsConfig                   `json:"tts"`
 	Llm             LlmConfig                   `json:"llm"`
 	Vad             VadConfig                   `json:"vad"`
+	RealtimeEnabled bool                        `json:"realtime_enabled"`
+	Realtime        RealtimeConfig              `json:"realtime"`
 	Memory          MemoryConfig                `json:"memory"`
 	VoiceIdentify   map[string]SpeakerGroupInfo `json:"voice_identify"`    // 声纹识别配置
 	MemoryMode      string                      `json:"memory_mode"`       // 记忆模式: none/short/long

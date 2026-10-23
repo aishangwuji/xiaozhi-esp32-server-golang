@@ -49,6 +49,8 @@ type AgentPayload struct {
 	CustomPrompt     string                  `json:"custom_prompt"`
 	LLMConfigID      *string                 `json:"llm_config_id"`
 	TTSConfigID      *string                 `json:"tts_config_id"`
+	RealtimeEnabled  bool                    `json:"realtime_enabled"`
+	RealtimeConfigID *string                 `json:"realtime_config_id"`
 	Voice            *string                 `json:"voice"`
 	ASRSpeed         string                  `json:"asr_speed"`
 	MemoryMode       *string                 `json:"memory_mode"`
@@ -138,22 +140,27 @@ func (svc *AgentService) Create(scope accessScope, payload AgentPayload) (*Agent
 	}
 
 	agent := models.Agent{
-		UserID:          targetUserID,
-		Name:            name,
-		Nickname:        nickname,
-		CustomPrompt:    payload.CustomPrompt,
-		LLMConfigID:     cleanStringPtr(payload.LLMConfigID),
-		TTSConfigID:     cleanStringPtr(payload.TTSConfigID),
-		Voice:           cleanStringPtr(payload.Voice),
-		ASRSpeed:        normalizeASRSpeed(payload.ASRSpeed),
-		MemoryMode:      normalizeMemoryModeFromPtr(payload.MemoryMode),
-		SpeakerChatMode: normalizeSpeakerChatModeFromPtr(payload.SpeakerChatMode),
+		UserID:           targetUserID,
+		Name:             name,
+		Nickname:         nickname,
+		CustomPrompt:     payload.CustomPrompt,
+		LLMConfigID:      cleanStringPtr(payload.LLMConfigID),
+		TTSConfigID:      cleanStringPtr(payload.TTSConfigID),
+		RealtimeEnabled:  payload.RealtimeEnabled,
+		RealtimeConfigID: cleanStringPtr(payload.RealtimeConfigID),
+		Voice:            cleanStringPtr(payload.Voice),
+		ASRSpeed:         normalizeASRSpeed(payload.ASRSpeed),
+		MemoryMode:       normalizeMemoryModeFromPtr(payload.MemoryMode),
+		SpeakerChatMode:  normalizeSpeakerChatModeFromPtr(payload.SpeakerChatMode),
 	}
 	normalizedMCP, err := normalizeAgentMCPServices(svc.DB, payload.MCPServiceNames)
 	if err != nil {
 		return nil, err
 	}
 	agent.MCPServiceNames = normalizedMCP
+	if err := validateAgentRealtimeSelection(svc.DB, agent.RealtimeEnabled, agent.RealtimeConfigID); err != nil {
+		return nil, err
+	}
 	applyOpenClawConfigToAgent(&agent, resolvePayloadOpenClawConfig(defaultOpenClawConfig(), payload))
 
 	knowledgeBaseIDs := []uint{}
@@ -207,6 +214,8 @@ func (svc *AgentService) Update(scope accessScope, id uint, payload AgentPayload
 	agent.CustomPrompt = payload.CustomPrompt
 	agent.LLMConfigID = cleanStringPtr(payload.LLMConfigID)
 	agent.TTSConfigID = cleanStringPtr(payload.TTSConfigID)
+	agent.RealtimeEnabled = payload.RealtimeEnabled
+	agent.RealtimeConfigID = cleanStringPtr(payload.RealtimeConfigID)
 	agent.Voice = cleanStringPtr(payload.Voice)
 	agent.ASRSpeed = normalizeASRSpeed(payload.ASRSpeed)
 	if payload.MemoryMode != nil {
@@ -224,6 +233,9 @@ func (svc *AgentService) Update(scope accessScope, id uint, payload AgentPayload
 		return nil, err
 	}
 	agent.MCPServiceNames = normalizedMCP
+	if err := validateAgentRealtimeSelection(svc.DB, agent.RealtimeEnabled, agent.RealtimeConfigID); err != nil {
+		return nil, err
+	}
 	applyOpenClawConfigToAgent(&agent, resolvePayloadOpenClawConfig(buildOpenClawConfigFromAgent(agent), payload))
 
 	if payload.KnowledgeBaseIDs != nil {

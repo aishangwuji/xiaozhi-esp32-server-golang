@@ -92,6 +92,12 @@ const routes = [
             meta: { title: 'TTS配置管理' }
           },
           {
+            path: 'realtime-config',
+            name: 'RealtimeConfig',
+            component: () => import('../views/admin/RealtimeConfig.vue'),
+            meta: { title: 'Qwen Realtime 配置' }
+          },
+          {
             path: 'speaker-config',
             name: 'SpeakerConfig',
             component: () => import('../views/admin/SpeakerConfig.vue'),

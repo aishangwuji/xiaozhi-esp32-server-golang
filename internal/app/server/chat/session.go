@@ -68,6 +68,7 @@ type ChatSession struct {
 	llmManager      *LLMManager
 	speakerManager  *SpeakerManager
 	mediaPlayer     *SessionMediaPlayer
+	realtimeAudio   *realtimeAudioSession
 	serverTransport *ServerTransport
 
 	ctx    context.Context
@@ -266,6 +267,25 @@ func (s *ChatSession) Start(pctx context.Context) error {
 	if s.clientState.InputAudioFormat.SampleRate <= 0 || s.clientState.InputAudioFormat.Channels <= 0 {
 		return fmt.Errorf("输入音频格式未初始化，请先完成 hello 握手")
 	}
+	if s.isRealtimeAudio() {
+		if err := s.InitMemory(); err != nil {
+			return err
+		}
+		if err := s.initHistoryMessages(); err != nil {
+			log.Warnf("初始化 realtime 对话历史失败: %v", err)
+		}
+		realtimeSession, err := newRealtimeAudioSession(s)
+		if err != nil {
+			return err
+		}
+		s.realtimeAudio = realtimeSession
+		if err := realtimeSession.Start(s.ctx); err != nil {
+			realtimeSession.Close()
+			return err
+		}
+		go s.ttsManager.Start(s.ctx)
+		return nil
+	}
 
 	err := s.InitAsrLlmTts()
 	if err != nil {
@@ -429,7 +449,10 @@ func (s *ChatSession) loadFromManager() ([]*schema.Message, error) {
 func (c *ChatSession) InitAsrLlmTts() error {
 	//初始化asr结构
 	c.clientState.InitAsr()
+	return c.InitMemory()
+}
 
+func (c *ChatSession) InitMemory() error {
 	// 初始化memory（memory不在资源池中）
 	memoryMode := c.clientState.GetMemoryMode()
 	memoryConfig := c.clientState.DeviceConfig.Memory
@@ -460,6 +483,9 @@ func (c *ChatSession) InitAsrLlmTts() error {
 
 // HandleAudioMessage 处理音频消息
 func (c *ChatSession) HandleAudioMessage(data []byte) bool {
+	if c.isRealtimeAudio() {
+		return c.realtimeAudio != nil && c.realtimeAudio.FeedAudio(data)
+	}
 	select {
 	case c.clientState.OpusAudioBuffer <- data:
 		return true
@@ -472,13 +498,17 @@ func (c *ChatSession) HandleAudioMessage(data []byte) bool {
 // handleListenMessage 处理监听消息
 func (s *ChatSession) HandleListenMessage(msg *ClientMessage) error {
 	// 根据状态处理
+	var err error
 	switch msg.State {
 	case MessageStateStart:
-		s.HandleListenStart(msg)
+		err = s.HandleListenStart(msg)
 	case MessageStateStop:
-		s.HandleListenStop()
+		err = s.HandleListenStop()
 	case MessageStateDetect:
-		s.HandleListenDetect(msg)
+		err = s.HandleListenDetect(msg)
+	}
+	if err != nil {
+		return err
 	}
 
 	// 记录日志
@@ -1091,6 +1121,12 @@ func (s *ChatSession) InterruptAndClearTTSQueueWithReason(reason string) {
 // handleAbortMessage 处理中止消息
 func (s *ChatSession) HandleAbortMessage(msg *ClientMessage) error {
 	s.cancelPendingDetectLLM()
+	if s.isRealtimeAudio() {
+		if s.realtimeAudio == nil {
+			return errors.New("realtime 会话尚未启动")
+		}
+		return s.realtimeAudio.Abort()
+	}
 
 	// 设置打断状态
 	s.clientState.Abort = true
@@ -1157,6 +1193,13 @@ func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
 	}
 	if !isActivated {
 		return nil
+	}
+	if s.isRealtimeAudio() {
+		if s.realtimeAudio == nil {
+			return errors.New("realtime 会话尚未启动")
+		}
+		s.clientState.ListenMode = msg.Mode
+		return s.realtimeAudio.StartListen()
 	}
 
 	now := time.Now()
@@ -1242,6 +1285,12 @@ func (s *ChatSession) HandleListenStart(msg *ClientMessage) error {
 
 func (s *ChatSession) HandleListenStop() error {
 	s.cancelPendingDetectLLM()
+	if s.isRealtimeAudio() {
+		if s.realtimeAudio == nil {
+			return errors.New("realtime 会话尚未启动")
+		}
+		return s.realtimeAudio.StopListen()
+	}
 	s.clientState.RecordCommandArrival(CommandTypeListenStop, time.Now())
 	/*if s.clientState.ListenMode == "auto" {
 		s.clientState.CancelSessionCtx()
@@ -1495,6 +1544,9 @@ func (s *ChatSession) IsClosing() bool {
 func (s *ChatSession) CloseWithReason(reason string) {
 	s.closing.Store(true)
 	s.closeOnce.Do(func() {
+		if s.realtimeAudio != nil {
+			s.realtimeAudio.Close()
+		}
 		// 清理ASR资源（资源管理在 ASRManager 内部）
 		if s.asrManager != nil {
 			s.asrManager.Cleanup()

@@ -288,6 +288,10 @@ func applyOutputAudioFormatForTTS(clientState *ClientState) {
 		clientState.OutputAudioFormat.SampleRate = 24000
 		clientState.OutputAudioFormat.FrameDuration = 20
 	}
+	if clientState.DeviceConfig.RealtimeEnabled {
+		clientState.OutputAudioFormat.SampleRate = 24000
+		clientState.OutputAudioFormat.FrameDuration = 20
+	}
 }
 
 func (c *ChatManager) ReloadDeviceConfig(ctx context.Context) error {

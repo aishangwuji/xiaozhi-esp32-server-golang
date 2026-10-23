@@ -86,6 +86,7 @@
               <el-menu-item index="/admin/asr-config">ASR 配置</el-menu-item>
               <el-menu-item index="/admin/llm-config">LLM 配置</el-menu-item>
               <el-menu-item index="/admin/tts-config">TTS 配置</el-menu-item>
+              <el-menu-item index="/admin/realtime-config">Qwen Realtime 配置</el-menu-item>
               <el-menu-item index="/admin/vision-config">Vision 配置</el-menu-item>
               <el-menu-item index="/admin/memory-config">Memory 配置</el-menu-item>
               <el-menu-item index="/admin/knowledge-search-config">知识库检索配置</el-menu-item>

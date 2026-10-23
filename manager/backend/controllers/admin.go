@@ -153,6 +153,8 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 		ASR             models.Config               `json:"asr"`
 		LLM             models.Config               `json:"llm"`
 		TTS             models.Config               `json:"tts"`
+		Realtime        models.Config               `json:"realtime"`
+		RealtimeEnabled bool                        `json:"realtime_enabled"`
 		Memory          models.Config               `json:"memory"`
 		VoiceIdentify   map[string]SpeakerGroupInfo `json:"voice_identify"`
 		KnowledgeBases  []KnowledgeBaseInfo         `json:"knowledge_bases"`
@@ -211,6 +213,19 @@ func (ac *AdminController) GetDeviceConfigs(c *gin.Context) {
 
 	if deviceFound && agent.ID != 0 {
 		response.MemoryMode = normalizeAgentMemoryMode(agent.MemoryMode)
+		response.RealtimeEnabled = agent.RealtimeEnabled
+		if agent.RealtimeEnabled {
+			query := ac.DB.Where("type = ? AND enabled = ?", "realtime", true)
+			if agent.RealtimeConfigID != nil && strings.TrimSpace(*agent.RealtimeConfigID) != "" {
+				query = query.Where("config_id = ?", strings.TrimSpace(*agent.RealtimeConfigID))
+			} else {
+				query = query.Where("is_default = ?", true)
+			}
+			if err := query.First(&response.Realtime).Error; err != nil {
+				c.JSON(http.StatusConflict, gin.H{"error": "智能体 Realtime 配置不可用"})
+				return
+			}
+		}
 		response.SpeakerChatMode = normalizeAgentSpeakerChatMode(agent.SpeakerChatMode)
 		response.MCPServiceNames = normalizeMCPServiceNamesCSV(agent.MCPServiceNames)
 		response.OpenClaw = buildOpenClawConfigFromAgent(agent)
@@ -3339,6 +3354,37 @@ func (ac *AdminController) DeleteTTSConfig(c *gin.Context) {
 	ac.deleteConfigWithType(c, "tts")
 }
 
+func (ac *AdminController) GetRealtimeConfigs(c *gin.Context) {
+	var configs []models.Config
+	if err := ac.DB.Where("type = ?", "realtime").Order("is_default DESC, name ASC").Find(&configs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取 Realtime 配置失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": configs})
+}
+
+func (ac *AdminController) CreateRealtimeConfig(c *gin.Context) {
+	var config models.Config
+	if err := c.ShouldBindJSON(&config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	config.Type = "realtime"
+	if err := validateRealtimeConfig(config.Provider, config.JsonData); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ac.createConfigWithType(c, &config)
+}
+
+func (ac *AdminController) UpdateRealtimeConfig(c *gin.Context) {
+	ac.updateConfigWithType(c, "realtime")
+}
+
+func (ac *AdminController) DeleteRealtimeConfig(c *gin.Context) {
+	ac.deleteConfigWithType(c, "realtime")
+}
+
 // Speaker配置管理（兼容前端）
 func (ac *AdminController) GetSpeakerConfigs(c *gin.Context) {
 	var configs []models.Config
@@ -3924,6 +3970,12 @@ func (ac *AdminController) updateConfigWithType(c *gin.Context, configType strin
 	// 如果提供了新的config_id，则更新它
 	if updateData.ConfigID != "" {
 		config.ConfigID = updateData.ConfigID
+	}
+	if configType == "realtime" {
+		if err := validateRealtimeConfig(config.Provider, config.JsonData); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	if err := ac.DB.Save(&config).Error; err != nil {
