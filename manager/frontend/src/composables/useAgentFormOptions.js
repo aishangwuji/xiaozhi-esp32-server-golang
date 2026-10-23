@@ -62,6 +62,8 @@ export const createDefaultAgentForm = ({ isAdmin = false, userId = null } = {}) 
   custom_prompt: DEFAULT_AGENT_PROMPT,
   llm_config_id: null,
   tts_config_id: null,
+  realtime_enabled: false,
+  realtime_config_id: null,
   voice: null,
   asr_speed: 'normal',
   memory_mode: 'short',
@@ -82,6 +84,8 @@ export const agentToForm = (agent = {}, { isAdmin = false } = {}) => {
     custom_prompt: agent.custom_prompt || DEFAULT_AGENT_PROMPT,
     llm_config_id: agent.llm_config_id || null,
     tts_config_id: agent.tts_config_id || null,
+    realtime_enabled: !!agent.realtime_enabled,
+    realtime_config_id: agent.realtime_config_id || null,
     voice: agent.voice || null,
     asr_speed: agent.asr_speed || 'normal',
     memory_mode: agent.memory_mode || 'short',
@@ -103,6 +107,8 @@ export const buildAgentPayload = (form = {}, { isAdmin = false } = {}) => {
     custom_prompt: form.custom_prompt || '',
     llm_config_id: normalizeNullableString(form.llm_config_id),
     tts_config_id: normalizeNullableString(form.tts_config_id),
+    realtime_enabled: !!form.realtime_enabled,
+    realtime_config_id: normalizeNullableString(form.realtime_config_id),
     voice: normalizeNullableString(form.voice),
     asr_speed: form.asr_speed || 'normal',
     memory_mode: form.memory_mode || 'short',
@@ -175,6 +181,7 @@ export function useAgentFormOptions(options = {}) {
   const agents = ref([])
   const llmConfigs = ref([])
   const ttsConfigs = ref([])
+  const realtimeConfigs = ref([])
   const knowledgeBases = ref([])
   const mcpServiceOptions = ref([])
   const voiceOptions = ref([])
@@ -216,13 +223,15 @@ export function useAgentFormOptions(options = {}) {
   const loadConfigs = async () => {
     loading.value.configs = true
     try {
-      const [llmResponse, ttsResponse] = await Promise.all([
+      const [llmResponse, ttsResponse, realtimeResponse] = await Promise.all([
         api.get(`${apiBase.value}/llm-configs`),
-        api.get(`${apiBase.value}/tts-configs`)
+        api.get(`${apiBase.value}/tts-configs`),
+        api.get(`${apiBase.value}/realtime-configs`)
       ])
       llmConfigs.value = sortConfigs(normalizeDataList(llmResponse))
       ttsConfigs.value = sortConfigs(normalizeDataList(ttsResponse))
-      return { llmConfigs: llmConfigs.value, ttsConfigs: ttsConfigs.value }
+      realtimeConfigs.value = sortConfigs(normalizeDataList(realtimeResponse))
+      return { llmConfigs: llmConfigs.value, ttsConfigs: ttsConfigs.value, realtimeConfigs: realtimeConfigs.value }
     } finally {
       loading.value.configs = false
     }
@@ -321,6 +330,7 @@ export function useAgentFormOptions(options = {}) {
     agents,
     llmConfigs,
     ttsConfigs,
+    realtimeConfigs,
     knowledgeBases,
     mcpServiceOptions,
     voiceOptions,

@@ -505,6 +505,15 @@ func (uc *UserController) GetTTSConfigs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": toUserConfigResponseList(configs)})
 }
 
+func (uc *UserController) GetRealtimeConfigs(c *gin.Context) {
+	var configs []models.Config
+	if err := uc.DB.Where("type = ? AND enabled = ?", "realtime", true).Order("is_default DESC, name ASC").Find(&configs).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取 Realtime 配置失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": toUserConfigResponseList(configs)})
+}
+
 // GetDeviceMcpTools 获取设备维度MCP工具列表（用户版本）
 func (uc *UserController) GetDeviceMcpTools(c *gin.Context) {
 	userID, _ := c.Get("user_id")

@@ -44,6 +44,15 @@
       />
     </el-form-item>
 
+    <el-form-item label="Qwen Audio Realtime">
+      <el-switch v-model="form.realtime_enabled" />
+    </el-form-item>
+    <el-form-item v-if="form.realtime_enabled" label="Realtime 配置" prop="realtime_config_id">
+      <el-select v-model="form.realtime_config_id" clearable placeholder="默认 Realtime 配置" style="width: 100%" :loading="loading.configs">
+        <el-option v-for="config in realtimeConfigs" :key="config.config_id" :label="config.is_default ? `${config.name} (默认)` : config.name" :value="config.config_id" />
+      </el-select>
+    </el-form-item>
+
     <el-form-item label="关联知识库" prop="knowledge_base_ids">
       <el-select
         v-model="form.knowledge_base_ids"
@@ -303,6 +312,7 @@ const {
   users,
   llmConfigs,
   ttsConfigs,
+  realtimeConfigs,
   knowledgeBases,
   mcpServiceOptions,
   voiceOptions,

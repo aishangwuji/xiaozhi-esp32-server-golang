@@ -185,6 +185,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				user.GET("/llm-configs", userController.GetLLMConfigs)
 				user.GET("/tts-configs", userController.GetTTSConfigs)
 				user.POST("/tts/preview", ttsPreviewController.PreviewUserTTS)
+				user.GET("/realtime-configs", userController.GetRealtimeConfigs)
 
 				// MCP接入点
 				user.GET("/mcp-services/options", userController.GetMCPServiceOptions)
@@ -275,6 +276,11 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				admin.POST("/tts-configs", adminController.CreateTTSConfig)
 				admin.PUT("/tts-configs/:id", adminController.UpdateTTSConfig)
 				admin.DELETE("/tts-configs/:id", adminController.DeleteTTSConfig)
+
+				admin.GET("/realtime-configs", adminController.GetRealtimeConfigs)
+				admin.POST("/realtime-configs", adminController.CreateRealtimeConfig)
+				admin.PUT("/realtime-configs/:id", adminController.UpdateRealtimeConfig)
+				admin.DELETE("/realtime-configs/:id", adminController.DeleteRealtimeConfig)
 
 				admin.GET("/speaker-configs", adminController.GetSpeakerConfigs)
 				admin.POST("/speaker-configs", adminController.CreateSpeakerConfig)

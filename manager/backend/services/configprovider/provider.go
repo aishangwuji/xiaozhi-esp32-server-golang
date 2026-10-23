@@ -26,6 +26,7 @@ var knownProviders = map[string]map[string]struct{}{
 	"vision": {
 		"aliyun_vision": {}, "doubao_vision": {},
 	},
+	"realtime": {"aliyun_qwen_realtime": {}},
 }
 
 func NormalizeProvider(configType, configID string, data map[string]interface{}) string {
@@ -106,7 +107,7 @@ func ExportData(configType, configID, provider string, data map[string]interface
 
 func isManagedProviderType(configType string) bool {
 	switch normalizeToken(configType) {
-	case "vad", "asr", "llm", "tts", "memory", "vision":
+	case "vad", "asr", "llm", "tts", "memory", "vision", "realtime":
 		return true
 	default:
 		return false

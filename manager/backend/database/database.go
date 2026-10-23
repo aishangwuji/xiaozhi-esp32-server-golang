@@ -96,6 +96,9 @@ func Init(cfg config.DatabaseConfig) *gorm.DB {
 	if err := repairConfigProviders(db); err != nil {
 		log.Printf("修复配置provider失败: %v", err)
 	}
+	if err := ensureDefaultRealtimeConfig(db); err != nil {
+		log.Printf("初始化 Realtime 默认配置失败: %v", err)
+	}
 	return db
 }
 

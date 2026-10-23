@@ -96,7 +96,12 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 				Provider string `json:"provider"`
 				JsonData string `json:"json_data"`
 			} `json:"tts"`
-			Memory struct {
+			Realtime struct {
+				Provider string `json:"provider"`
+				JsonData string `json:"json_data"`
+			} `json:"realtime"`
+			RealtimeEnabled bool `json:"realtime_enabled"`
+			Memory          struct {
 				Provider string `json:"provider"`
 				JsonData string `json:"json_data"`
 			} `json:"memory"`
@@ -190,6 +195,11 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 			Provider: response.Data.TTS.Provider,
 			Config:   parseJsonData(response.Data.TTS.JsonData),
 		},
+		RealtimeEnabled: response.Data.RealtimeEnabled,
+		Realtime: types.RealtimeConfig{
+			Provider: response.Data.Realtime.Provider,
+			Config:   parseJsonData(response.Data.Realtime.JsonData),
+		},
 		Llm: types.LlmConfig{
 			Provider: response.Data.LLM.Provider,
 			Config:   parseJsonData(response.Data.LLM.JsonData),
@@ -219,7 +229,7 @@ func (c *ConfigManager) GetUserConfig(ctx context.Context, deviceID string) (typ
 	}
 	config.SpeakerChatMode = normalizeSpeakerChatMode(config.SpeakerChatMode)
 
-	log.Log().Info("成功获取设备配置", "device_id", deviceID)
+	log.Log().Info("成功获取设备配置", "device_id", deviceID, "realtime_enabled", config.RealtimeEnabled)
 	return config, nil
 }
 
