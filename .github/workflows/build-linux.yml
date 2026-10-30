@@ -1,0 +1,60 @@
+name: Build Linux amd64 (xiaozhi)
+
+# 只编 Linux amd64 一个目标，用官方 Dockerfile 保证 glibc/libc++ 与发布版一致
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'doc/**'
+
+concurrency:
+  group: build-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux-amd64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout (含 asr_server 子模块)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: 校验子模块
+        run: |
+          if [ ! -f asr_server/server/setup.go ]; then
+            echo "::error::asr_server 子模块未拉取，binary 构建需要它"
+            exit 1
+          fi
+
+      - name: 构建（官方 Dockerfile, ubuntu:18.04 工具链）
+        run: docker build --target builder -f docker/Dockerfile.linux -t xiaozhi-build .
+
+      - name: 提取产物
+        run: |
+          docker create --name xz xiaozhi-build
+          docker cp xz:/out ./out
+          docker rm xz
+          ls -lh out/linux-amd64/xiaozhi_server-linux-amd64/ | head -20
+
+      - name: 记录构建信息
+        run: |
+          BIN=out/linux-amd64/xiaozhi_server-linux-amd64/xiaozhi_server
+          echo "### 构建结果" >> $GITHUB_STEP_SUMMARY
+          echo "- commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 大小: $(du -h $BIN | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          echo "- sha256: \`$(sha256sum $BIN | cut -d' ' -f1)\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaozhi_server-linux-amd64
+          path: out/linux-amd64/xiaozhi_server-linux-amd64
+          retention-days: 14
