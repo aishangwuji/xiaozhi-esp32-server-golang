@@ -92,6 +92,9 @@ func InitChatLocalMCPTools() {
 	}
 
 	log.Info("聊天相关的本地MCP工具初始化完成")
+
+	// 联网搜索工具（web_search/web_fetch，DeepSeek Search/Fetch API）
+	InitWebSearchMCPTools()
 }
 
 func RegisterLocalMcpFunc(name string, description string, params any, handle mcp_manager.LocalToolHandler) error {

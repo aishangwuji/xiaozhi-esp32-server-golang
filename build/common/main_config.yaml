@@ -314,6 +314,14 @@ local_mcp:
   exit_conversation: true           # 允许退出对话
   clear_conversation_history: true  # 允许清除对话历史
 
+# 联网搜索配置（本地MCP工具 web_search / web_fetch）
+websearch:
+  enabled: true                       # 是否启用联网搜索工具
+  deepseek:
+    base_url: "https://api.deepseek.com"  # DeepSeek API 地址
+    api_key: ""                         # DeepSeek API Key（必填，未配置时工具不注册）
+    timeout_seconds: 30                 # 请求超时时间（秒）
+
 # Memory 长记忆配置
 memory:
   provider: "nomemo"  # 记忆提供商: nomemo(无长记忆) llm(短期对话记忆,基于Redis) / memobase(长期记忆) / mem0 / memos(MemOS, 兼容Mem0 API)
