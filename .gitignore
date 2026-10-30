@@ -7,3 +7,7 @@ node_modules/
 config_shijingbo.json
 config_shijingbo.yaml
 .idea
+
+# 构建 / 部署产物（build-and-deploy.sh、deploy-from-actions.sh 生成）
+out/
+ci-out/
