@@ -67,6 +67,12 @@ func InitChatLocalMCPTools() {
 			Params:      SearchKnowledgeParams{},
 			Handle:      searchKnowledgeHandler,
 		},
+		"calculate": {
+			Name:        "calculate",
+			Description: "精确计算数学表达式，结果由真实运算得出而非估算。凡涉及多位数加减乘除、乘方(^)、取模(%)、开方(sqrt)、百分比、多步混合运算，必须调用本工具后再回答，不要自己心算——心算大数容易出错。两位数以内的简单加减乘除外。表达式只放数字与运算符，例如 (1234567+89)*3.5、2^100，不要带单位或中文说明。计算完成后原样报出表达式与结果",
+			Params:      CalculateParams{},
+			Handle:      calculateHandler,
+		},
 		/*"play_music": {
 			Name:        "play_music",
 			Description: "当用户想听歌、无聊时、想放空大脑时使用，用于播放指定名称的音乐，当用户想随便听一首音乐时请推荐出具体的歌曲名称，当有多个音乐播放工具时优先使用此工具，**此工具调用耗时较长，需要先返回友好的过渡性提示语**",

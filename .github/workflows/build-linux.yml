@@ -17,7 +17,29 @@ permissions:
   contents: read
 
 jobs:
+  # Windows/WSL 本机都编不了这个仓库（cgo 依赖，见 AGENTS.md 4.2），
+  # 所以单元测试只能在 CI 跑。测试绿了才允许构建。
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout (含 asr_server 子模块)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: 安装 Go (与 go.mod toolchain 一致)
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: go.sum
+
+      - name: 单元测试（calculator 等纯逻辑）
+        run: go test ./internal/app/server/chat/ -run "TestCalculate" -v
+
   build-linux-amd64:
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
