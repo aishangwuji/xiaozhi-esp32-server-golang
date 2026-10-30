@@ -8,8 +8,6 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/websearch"
 	log "xiaozhi-esp32-server-golang/logger"
-
-	"github.com/spf13/viper"
 )
 
 // InitWebSearchMCPTools 初始化联网搜索相关的本地MCP工具（web_search / web_fetch），
