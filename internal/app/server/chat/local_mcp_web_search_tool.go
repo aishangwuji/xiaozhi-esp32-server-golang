@@ -8,6 +8,8 @@ import (
 
 	"xiaozhi-esp32-server-golang/internal/domain/websearch"
 	log "xiaozhi-esp32-server-golang/logger"
+
+	mcp_manager "xiaozhi-esp32-server-golang/internal/domain/mcp"
 )
 
 // InitWebSearchMCPTools 初始化联网搜索相关的本地MCP工具（web_search / web_fetch），
@@ -41,6 +43,21 @@ func InitWebSearchMCPTools() {
 	); err != nil {
 		log.Errorf("注册 web_fetch 工具失败: %v", err)
 	}
+}
+
+// ReloadWebSearchMCPTools 配置热更时重建联网搜索工具：
+// 先注销已注册的 web_search/web_fetch，再按最新配置决定是否重新注册。
+func ReloadWebSearchMCPTools() {
+	manager := mcp_manager.GetLocalMCPManager()
+	for _, name := range []string{"web_search", "web_fetch"} {
+		if _, exists := manager.GetToolByName(name); exists {
+			if err := manager.UnregisterTool(name); err != nil {
+				log.Warnf("热更时注销本地工具 %s 失败: %v", name, err)
+			}
+		}
+	}
+	InitWebSearchMCPTools()
+	log.Info("联网搜索工具已按最新配置重载")
 }
 
 // WebSearchParams web_search 工具入参

@@ -325,6 +325,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				admin.POST("/mcp-configs/discover-tools", adminController.DiscoverMCPConfigTools)
 				admin.PUT("/mcp-configs/:id", adminController.UpdateMCPConfig)
 				admin.DELETE("/mcp-configs/:id", adminController.DeleteMCPConfig)
+				admin.POST("/websearch-configs/test", adminController.TestWebSearchConnection)
 				admin.GET("/mcp-markets", adminController.GetMCPMarkets)
 				admin.POST("/mcp-markets", adminController.CreateMCPMarket)
 				admin.PUT("/mcp-markets/:id", adminController.UpdateMCPMarket)

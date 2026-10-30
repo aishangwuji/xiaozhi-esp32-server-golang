@@ -71,8 +71,9 @@ func main() {
 		oldUdp := current["udp"]
 		oldMcp := current["mcp"]
 		oldLocalMcp := current["local_mcp"]
+		oldWebSearch := current["websearch"]
 
-		var doMqttServer, doMqttReload, doUdpReload, doMcpReload bool
+		var doMqttServer, doMqttReload, doUdpReload, doMcpReload, doWebSearchReload bool
 		if data["mqtt_server"] != nil {
 			if !SystemConfigEqual(data["mqtt_server"], oldMqttServer) {
 				doMqttServer = true
@@ -96,6 +97,11 @@ func main() {
 		if data["local_mcp"] != nil {
 			if !SystemConfigEqual(data["local_mcp"], oldLocalMcp) {
 				doMcpReload = true
+			}
+		}
+		if data["websearch"] != nil {
+			if !SystemConfigEqual(data["websearch"], oldWebSearch) {
+				doWebSearchReload = true
 			}
 		}
 
@@ -122,6 +128,15 @@ func main() {
 				defer wg.Done()
 				if err := appInstance.ReloadMCP(); err != nil {
 					log.Errorf("ReloadMCP failed: %v", err)
+				}
+			}()
+		}
+		if doWebSearchReload {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := appInstance.ReloadWebSearchTools(); err != nil {
+					log.Errorf("ReloadWebSearchTools failed: %v", err)
 				}
 			}()
 		}

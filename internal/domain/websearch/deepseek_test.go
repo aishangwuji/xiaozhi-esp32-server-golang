@@ -142,8 +142,8 @@ func TestFetchInvalidURL(t *testing.T) {
 	})
 	cases := []string{
 		"",
-		"ftp://example.com/a",         // 非 http/https
-		"example.com/no-host",         // 无 host
+		"ftp://example.com/a",            // 非 http/https
+		"example.com/no-host",            // 无 host
 		"https://user:pass@example.com/", // 带用户名密码
 	}
 	for _, u := range cases {

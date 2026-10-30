@@ -310,6 +310,12 @@ func (app *App) ReloadMCP() error {
 	return nil
 }
 
+// ReloadWebSearchTools 配置热更时重载联网搜索本地工具（web_search / web_fetch）
+func (app *App) ReloadWebSearchTools() error {
+	chat.ReloadWebSearchMCPTools()
+	return nil
+}
+
 // 所有协议新连接都走这里
 func (a *App) OnNewConnection(transport types.IConn) {
 	deviceID := transport.GetDeviceID()

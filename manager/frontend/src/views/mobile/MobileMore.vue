@@ -86,7 +86,8 @@ const aiItems = [
   { title: 'TTS 配置', path: '/admin/tts-config' },
   { title: 'Vision 配置', path: '/admin/vision-config' },
   { title: 'Memory 配置', path: '/admin/memory-config' },
-  { title: '知识库检索配置', path: '/admin/knowledge-search-config' }
+  { title: '知识库检索配置', path: '/admin/knowledge-search-config' },
+  { title: '联网搜索配置', path: '/admin/websearch-config' }
 ]
 
 const systemItems = [

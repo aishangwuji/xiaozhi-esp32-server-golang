@@ -152,6 +152,12 @@ const routes = [
             meta: { title: '知识库检索配置' }
           },
           {
+            path: 'websearch-config',
+            name: 'WebSearchConfig',
+            component: () => import('../views/admin/WebSearchConfig.vue'),
+            meta: { title: '联网搜索配置' }
+          },
+          {
             path: 'chat-settings',
             name: 'ChatSettings',
             component: () => import('../views/admin/ChatSettings.vue'),

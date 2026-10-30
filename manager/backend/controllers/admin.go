@@ -627,7 +627,7 @@ func (ac *AdminController) getSystemConfigsData() (gin.H, error) {
 	}
 
 	var allConfigs []models.Config
-	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota", "mcp", "local_mcp", "voice_identify", "tts", "vad", "asr", "llm", "vision", "auth", "chat", "knowledge_search"}).Find(&allConfigs).Error; err != nil {
+	if err := ac.DB.Where("type IN (?)", []string{"mqtt", "mqtt_server", "udp", "ota", "mcp", "local_mcp", "voice_identify", "tts", "vad", "asr", "llm", "vision", "auth", "chat", "knowledge_search", "websearch"}).Find(&allConfigs).Error; err != nil {
 		return nil, err
 	}
 
@@ -834,6 +834,11 @@ func (ac *AdminController) getSystemConfigsData() (gin.H, error) {
 	// 处理独立的local_mcp配置（如果存在）
 	if configs, exists := configsByType["local_mcp"]; exists && len(configs) > 0 {
 		response["local_mcp"] = selectAndParseConfig(configs)
+	}
+
+	// 处理联网搜索配置（本地MCP工具 web_search / web_fetch）
+	if configs, exists := configsByType["websearch"]; exists && len(configs) > 0 {
+		response["websearch"] = selectAndParseConfig(configs)
 	}
 
 	// 处理知识库全局配置：knowledge.default_provider + knowledge.providers
@@ -4017,6 +4022,7 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 		OTA           map[string]interface{} `yaml:"ota,omitempty"`
 		MCP           map[string]interface{} `yaml:"mcp,omitempty"`
 		LocalMCP      map[string]interface{} `yaml:"local_mcp,omitempty"`
+		WebSearch     map[string]interface{} `yaml:"websearch,omitempty"`
 	}
 
 	exportConfig := ExportConfig{
@@ -4035,6 +4041,7 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 		OTA:           make(map[string]interface{}),
 		MCP:           make(map[string]interface{}),
 		LocalMCP:      make(map[string]interface{}),
+		WebSearch:     make(map[string]interface{}),
 	}
 
 	// 获取所有配置
@@ -4175,6 +4182,11 @@ func (ac *AdminController) ExportConfigs(c *gin.Context) {
 			for key, value := range jsonData {
 				exportConfig.LocalMCP[key] = value
 			}
+		case "websearch":
+			// 处理联网搜索配置
+			for key, value := range jsonData {
+				exportConfig.WebSearch[key] = value
+			}
 		}
 	}
 
@@ -4273,7 +4285,7 @@ func (ac *AdminController) ImportConfigs(c *gin.Context) {
 	log.Printf("全局角色清空成功，删除了 %d 条记录", result2.RowsAffected)
 
 	// 导入配置 - 只处理实际存在的模块
-	configTypes := []string{"vad", "asr", "llm", "tts", "memory", "auth", "chat", "ota", "mqtt", "mqtt_server", "udp", "mcp", "local_mcp"}
+	configTypes := []string{"vad", "asr", "llm", "tts", "memory", "auth", "chat", "ota", "mqtt", "mqtt_server", "udp", "mcp", "local_mcp", "websearch"}
 	log.Printf("开始导入配置，配置类型: %v", configTypes)
 
 	// 处理 voice_identify 配置（映射到 speaker 类型）

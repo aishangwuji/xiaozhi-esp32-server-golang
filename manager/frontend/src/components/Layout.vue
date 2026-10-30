@@ -90,6 +90,7 @@
               <el-menu-item index="/admin/vision-config">Vision 配置</el-menu-item>
               <el-menu-item index="/admin/memory-config">Memory 配置</el-menu-item>
               <el-menu-item index="/admin/knowledge-search-config">知识库检索配置</el-menu-item>
+              <el-menu-item index="/admin/websearch-config">联网搜索配置</el-menu-item>
             </el-sub-menu>
 
             <el-menu-item v-if="authStore.isAdmin" index="/voice-clones">

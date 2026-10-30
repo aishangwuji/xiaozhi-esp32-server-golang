@@ -86,18 +86,24 @@ type apiError struct {
 }
 
 var (
-	httpClient *http.Client
-	once       sync.Once
+	clientMu      sync.Mutex
+	httpClient    *http.Client
+	clientTimeout time.Duration
 )
 
+// getHTTPClient 返回共享的 HTTP client；超时配置变更时自动重建，便于配置热更
 func getHTTPClient() *http.Client {
-	once.Do(func() {
-		timeout := defaultTimeout
-		if n := viper.GetInt("websearch.deepseek.timeout_seconds"); n > 0 {
-			timeout = time.Duration(n) * time.Second
-		}
+	timeout := defaultTimeout
+	if n := viper.GetInt("websearch.deepseek.timeout_seconds"); n > 0 {
+		timeout = time.Duration(n) * time.Second
+	}
+
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	if httpClient == nil || clientTimeout != timeout {
 		httpClient = &http.Client{Timeout: timeout}
-	})
+		clientTimeout = timeout
+	}
 	return httpClient
 }
 
