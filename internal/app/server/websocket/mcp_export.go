@@ -190,8 +190,12 @@ func (s *MCPExportServer) handleMessage(w http.ResponseWriter, r *http.Request, 
 func (s *MCPExportServer) buildAgentMCPServer(agentId string, tools map[string]tool.InvokableTool) *mcpserver.MCPServer {
 	mcpSrv := mcpserver.NewMCPServer("lingxi-agent-"+agentId, "1.0.0",
 		mcpserver.WithInstructions("灵起（LingXi）游戏 NPC 的业务工具。调用工具会直接在玩家面前产生游戏内效果（打开商店、接取任务等）。"))
-	for name, t := range tools {
-		info := t.Info()
+	for _, t := range tools {
+		info, infoErr := t.Info(context.Background())
+		if infoErr != nil || info == nil {
+			log.Warnf("MCP导出: agent=%s 跳过无 Info 的工具", agentId)
+			continue
+		}
 		// InputSchema 固定宽松 object：参数语义靠 description 约定（工具侧自行解析 arguments）
 		mcpTool := mcp.NewTool(info.Name, mcp.WithDescription(info.Desc))
 		fn := t
