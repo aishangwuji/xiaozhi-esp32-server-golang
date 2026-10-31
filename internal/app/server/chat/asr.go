@@ -125,6 +125,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
 		lastSpeakerPeekDoneAt := atomic.Int64{}
 		var speakerPeekAudioMs int64
 		var speakerPeekRequestSeq uint64
+		var lastAsrFeedMs int64 // 最近一次向 provider 通道喂包的时间（保活用）
 		const speakerPeekInterval = 200 * time.Millisecond
 		const firstSpeakerPeekAudioThresholdMs int64 = 400
 		audioFormat := state.InputAudioFormat
@@ -344,6 +345,22 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
 					state.Vad.AddIdleDuration(int64(frameDurationMs))
 					state.Vad.ResetVoiceContinuousDuration()
 
+					// [LingXi 2026-10-31] 流式 ASR 静默保活：豆包等云端 ASR 有“等待下一个
+					// 音频包”的会话超时(实测约 15s, 45000081)。VAD 门控下静默期零喂包会被
+					// 云端掐流，恢复期与玩家下一句话衔接不良，表现为“第二轮听不到”。
+					// 在 ASR 流已打开且超过 5s 未喂包时注入 100ms 静音帧保活；
+					// 静音不触发 VAD 收口/识别，识别语义不变。
+					if state.Asr.HasOpenAudioInput() {
+						nowMs := time.Now().UnixMilli()
+						if nowMs-lastAsrFeedMs > 5000 {
+							keepaliveSamples := audioFormat.SampleRate * audioFormat.Channels / 10
+							if keepaliveSamples > 0 {
+								_ = state.Asr.AddAudioData(make([]float32, keepaliveSamples))
+								lastAsrFeedMs = nowMs
+							}
+						}
+					}
+
 					// 没有声音时，如果之前也没有语音，则重置累积的声音时长
 					// 如果之前有语音但本次没有，保留时长值，让后续逻辑判断是否应该重置
 					if !clientHaveVoice {
@@ -365,6 +382,7 @@ func (a *ASRManager) ProcessVadAudio(ctx context.Context) {
 					//vad识别成功, 往asr音频通道里发送数据
 					//log.Infof("vad识别成功, 往asr音频通道里发送数据, len: %d", len(pcmData))
 					state.Asr.AddAudioData(pcmData)
+					lastAsrFeedMs = time.Now().UnixMilli()
 
 					// 声纹只接收当前判定为有声的帧，避免将首段前导静音和尾静音送入识别流。
 					if haveVoice &&
