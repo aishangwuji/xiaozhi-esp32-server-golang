@@ -351,7 +351,14 @@ func (a *App) OnNewConnection(transport types.IConn) {
 
 	// 启动ChatManager
 	go func() {
+		// 活跃心跳：连接存续期间周期性上报设备活跃事件，让控制台的
+		// “最后活跃时间/在线状态”不因会话变长而失真（断开时会上报最终时刻）
+		stopHeartbeat := make(chan struct{})
+		if notifyLifecycleOnManager {
+			go a.runDeviceActiveHeartbeat(deviceID, chatManager, stopHeartbeat)
+		}
 		defer func() {
+			close(stopHeartbeat)
 			// ChatManager结束时，从映射中移除
 			if storedManager, exists := a.chatManagers.Get(deviceID); exists && storedManager == chatManager {
 				a.chatManagers.Remove(deviceID)
@@ -366,6 +373,28 @@ func (a *App) OnNewConnection(transport types.IConn) {
 			log.Errorf("ChatManager启动失败: %v", err)
 		}
 	}()
+}
+
+// deviceActiveReportInterval 设备活跃心跳上报间隔，必须小于控制台判定在线的5分钟窗口
+const deviceActiveReportInterval = time.Minute
+
+// runDeviceActiveHeartbeat 连接存续期间周期性上报设备活跃事件（心跳）。
+// manager 端据此刷新 devices.last_active_at，避免长时间会话下控制台显示陈旧的最后活跃时间、
+// 误标离线。stopCh 关闭或该 ChatManager 不再是设备当前会话时退出。
+func (a *App) runDeviceActiveHeartbeat(deviceID string, manager *chat.ChatManager, stopCh <-chan struct{}) {
+	ticker := time.NewTicker(deviceActiveReportInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			if current, exists := a.chatManagers.Get(deviceID); !exists || current != manager {
+				return
+			}
+			a.DeviceOnline(deviceID)
+		}
+	}
 }
 
 func (a *App) onMqttTransportReady(deviceID string) {

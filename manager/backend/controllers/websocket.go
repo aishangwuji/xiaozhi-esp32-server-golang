@@ -431,17 +431,14 @@ func (client *WebSocketClient) handleDeviceActiveRequest(request *WebSocketReque
 
 	// 更新设备最后活跃时间
 	now := time.Now()
-	result := client.controller.DB.Model(&models.Device{}).
-		Where("device_name = ?", deviceID).
-		Update("last_active_at", now)
-
-	if result.Error != nil {
-		log.Printf("更新设备活跃时间失败: %v", result.Error)
-		client.sendResponse(request.ID, 500, nil, fmt.Sprintf("更新设备活跃时间失败: %v", result.Error))
+	rowsAffected, err := updateDeviceLastActive(client.controller.DB, deviceID, now)
+	if err != nil {
+		log.Printf("更新设备活跃时间失败: %v", err)
+		client.sendResponse(request.ID, 500, nil, fmt.Sprintf("更新设备活跃时间失败: %v", err))
 		return
 	}
 
-	if result.RowsAffected == 0 {
+	if rowsAffected == 0 {
 		log.Printf("设备不存在: %s", deviceID)
 		client.sendResponse(request.ID, 404, nil, "设备不存在")
 		return
@@ -476,18 +473,18 @@ func (client *WebSocketClient) handleDeviceInactiveRequest(request *WebSocketReq
 
 	log.Printf("处理设备离线请求，device_id: %s", deviceID)
 
-	// 将设备最后活跃时间设置为0（离线状态）
-	result := client.controller.DB.Model(&models.Device{}).
-		Where("device_name = ?", deviceID).
-		Update("last_active_at", nil) // 设置为NULL表示离线
-
-	if result.Error != nil {
-		log.Printf("更新设备离线状态失败: %v", result.Error)
-		client.sendResponse(request.ID, 500, nil, fmt.Sprintf("更新设备离线状态失败: %v", result.Error))
+	// 设备离线：把最后活跃时间定格为离线时刻。
+	// 不能置NULL：置空会抹掉历史，控制台设备列表会一直显示“从未活跃”，
+	// 丢失设备上次在线时间；离线状态由前端按“5分钟内有无活跃”判定，无需清空字段。
+	now := time.Now()
+	rowsAffected, err := updateDeviceLastActive(client.controller.DB, deviceID, now)
+	if err != nil {
+		log.Printf("更新设备离线状态失败: %v", err)
+		client.sendResponse(request.ID, 500, nil, fmt.Sprintf("更新设备离线状态失败: %v", err))
 		return
 	}
 
-	if result.RowsAffected == 0 {
+	if rowsAffected == 0 {
 		log.Printf("设备不存在: %s", deviceID)
 		client.sendResponse(request.ID, 404, nil, "设备不存在")
 		return
@@ -496,12 +493,21 @@ func (client *WebSocketClient) handleDeviceInactiveRequest(request *WebSocketReq
 	// 构造成功响应
 	response := map[string]interface{}{
 		"device_id":      deviceID,
-		"last_active_at": nil, // 离线状态
+		"last_active_at": now.Format(time.RFC3339),
 		"message":        "设备离线状态更新成功",
 	}
 
 	client.sendResponse(request.ID, 200, response, "")
 	log.Printf("设备 %s 已设置为离线状态", deviceID)
+}
+
+// updateDeviceLastActive 更新设备最后活跃时间（devices.last_active_at）。
+// 上线/心跳/离线三类事件共用此写入路径，保证控制台“最后活跃时间”口径一致。
+func updateDeviceLastActive(db *gorm.DB, deviceID string, ts time.Time) (int64, error) {
+	result := db.Model(&models.Device{}).
+		Where("device_name = ?", deviceID).
+		Update("last_active_at", ts)
+	return result.RowsAffected, result.Error
 }
 
 // 发送响应
