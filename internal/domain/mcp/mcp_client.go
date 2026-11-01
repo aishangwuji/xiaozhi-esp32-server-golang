@@ -302,7 +302,7 @@ func GetToolsByDeviceIdWithTransport(deviceId string, agentId string, transportT
 		deviceTools, err := mcpClientPool.GetAllToolsByDeviceIdAndAgentId(deviceId, agentId)
 		if err != nil {
 			log.Errorf("获取设备 %s 的工具失败: %v", deviceId, err)
-			return retTools, nil
+			return ApplyToolManifestOverrides(agentId, retTools), nil
 		}
 		for toolName, tool := range deviceTools {
 			if _, exists := retTools[toolName]; !exists {
@@ -315,7 +315,7 @@ func GetToolsByDeviceIdWithTransport(deviceId string, agentId string, transportT
 		agentTools, err := mcpClientPool.GetWsEndpointMcpTools(agentId)
 		if err != nil {
 			log.Errorf("获取智能体 %s 的工具失败: %v", agentId, err)
-			return retTools, nil
+			return ApplyToolManifestOverrides(agentId, retTools), nil
 		}
 		log.Debugf("从智能体 %s 获取到 %d 个 ws endpoint MCP 工具, device=%s", agentId, len(agentTools), deviceId)
 		for toolName, tool := range agentTools {
@@ -326,7 +326,8 @@ func GetToolsByDeviceIdWithTransport(deviceId string, agentId string, transportT
 	}
 	log.Infof("设备 %s 总共获取到 %d 个工具", deviceId, len(retTools))
 
-	return retTools, nil
+	// 工具描述服务端化：聚合完成后按 manager 控制台的 NPC 工具清单做目录级覆盖
+	return ApplyToolManifestOverrides(agentId, retTools), nil
 }
 
 func GetWsEndpointMcpTools(agentId string) (map[string]tool.InvokableTool, error) {
