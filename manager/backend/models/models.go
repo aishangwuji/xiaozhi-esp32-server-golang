@@ -340,3 +340,27 @@ func (m *ChatMessage) AfterFind(tx *gorm.DB) error {
 	}
 	return nil
 }
+
+// NpcToolManifest NPC工具清单（服务端工具描述服务端化的云端目录）
+// 语义（与主服务 internal/domain/mcp/tool_manifest.go 的合并逻辑对齐）：
+//   - 只覆盖/摘除设备侧（游戏客户端）已上报的工具，不新增工具；
+//     客户端 can_offer 仍是工具可用性的第一裁决，本表只做目录级调整；
+//   - enabled=false 的条目会在工具聚合时被摘除（云端总开关）；
+//   - description/input_schema 为空表示不覆盖对应字段；
+//   - agent_id 为空串的条目是全局默认清单，agent 专属条目优先于全局条目。
+type NpcToolManifest struct {
+	ID          uint      `json:"id" gorm:"primarykey"`
+	AgentID     string    `json:"agent_id" gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_npc_tool_agent_tool,priority:1"`    // 智能体ID（agents.id 的字符串形态）；空串=全局默认清单
+	ToolName    string    `json:"tool_name" gorm:"type:varchar(128);not null;default:'';uniqueIndex:uk_npc_tool_agent_tool,priority:2"` // MCP工具名，与设备侧上报的工具名严格一致（如 npc_trade）
+	Description string    `json:"description" gorm:"type:text"`               // 覆盖工具描述（LLM 据此判定调用时机）；空串=不覆盖
+	InputSchema string    `json:"input_schema" gorm:"type:text"`              // 覆盖工具入参 schema（openapi3 JSON 对象文本）；空串=不覆盖
+	Enabled     bool      `json:"enabled" gorm:"default:true"`                // 是否启用；false=聚合时从工具列表摘除（云端总开关）
+	Remark      string    `json:"remark" gorm:"type:varchar(255);default:''"` // 运营备注（改动原因等，仅人工查阅）
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// TableName 指定表名
+func (NpcToolManifest) TableName() string {
+	return "npc_tool_manifest"
+}

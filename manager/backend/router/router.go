@@ -91,6 +91,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			internal.POST("/internal/pool/stats", poolStatsController.ReportPoolStats)                             // 上报资源池统计数据（内部服务接口）
 			internal.POST("/internal/devices/:device_name/switch-role", adminController.SwitchDeviceRoleByNameInternal)
 			internal.POST("/internal/devices/:device_name/restore-default-role", adminController.RestoreDeviceDefaultRoleInternal)
+			internal.GET("/internal/npc-tools", adminController.GetNpcToolManifestsInternal) // NPC工具清单：主服务聚合工具时拉取覆盖项
 		}
 
 		// 需要认证的路由
@@ -248,6 +249,11 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			admin := auth.Group("/admin")
 			admin.Use(middleware.AdminAuth())
 			{
+				// NPC 工具清单（工具描述服务端化）：覆盖/摘除设备侧上报的 MCP 工具
+				admin.GET("/npc-tools", adminController.GetNpcToolManifests)
+				admin.POST("/npc-tools", adminController.UpsertNpcToolManifest)
+				admin.DELETE("/npc-tools/:id", adminController.DeleteNpcToolManifest)
+
 				// 通用配置管理
 				admin.GET("/configs", adminController.GetConfigs)
 				admin.POST("/configs", adminController.CreateConfig)
