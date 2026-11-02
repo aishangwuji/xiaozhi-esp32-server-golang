@@ -34,6 +34,26 @@
             <pre class="code-box">{{ mcpEndpointData.endpoint || '暂无接入点，请先保存智能体并刷新。' }}</pre>
           </div>
 
+          <div class="result-block">
+            <div class="field-label">MCP 导出端点（对外平台 · SSE）</div>
+            <div class="export-row">
+              <pre class="code-box export-box">{{ mcpExportData.url || mcpExportUnavailableText }}</pre>
+              <el-button
+                size="small"
+                type="primary"
+                :disabled="!mcpExportData.ready"
+                @click="copyMcpExportEndpoint"
+              >
+                复制
+              </el-button>
+            </div>
+            <div class="field-help">
+              供小智官方等标准 MCP 客户端消费：填入后其 tools/list 聚合到的正是本智能体的设备侧工具
+              （含游戏经 <code>/mcp</code> 端点注册的 <code>npc_*</code> 工具）。
+              与上方接入点共用同一套 token，无需单独配置。
+            </div>
+          </div>
+
           <div class="tool-header">
             <div class="field-label">MCP 工具列表</div>
             <el-button size="small" type="primary" @click="refreshMcpTools" :loading="toolsLoading">
@@ -140,6 +160,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import api from '../../utils/api'
 import { postJSONWithSSE } from '../../utils/sse'
 import { buildOpenClawCommands } from '../../utils/openclaw'
+import { buildMcpExportEndpoint, describeMcpExportUnavailable } from '../../utils/mcpExport'
 
 const props = defineProps({
   agentId: {
@@ -213,6 +234,14 @@ const mcpStatusDetailText = computed(() => {
   if (count > 0) return `当前 ${count} 个客户端在线`
   return mcpEndpointData.value.status_message || '暂无在线客户端'
 })
+
+// 导出端点由接入点 URL 纯推导（同一套 agent JWT，见 utils/mcpExport.js），无需额外请求
+const mcpExportData = computed(() =>
+  buildMcpExportEndpoint(mcpEndpointData.value.endpoint, props.agentId)
+)
+const mcpExportUnavailableText = computed(() =>
+  describeMcpExportUnavailable(mcpExportData.value.reason)
+)
 
 const mcpSummaryText = computed(() => {
   if (!mcpEndpointLoaded.value) return '展开后加载接入点与工具'
@@ -445,6 +474,19 @@ const copyMcpEndpoint = async () => {
   try {
     await navigator.clipboard.writeText(mcpEndpointData.value.endpoint)
     ElMessage.success('MCP接入点URL已复制')
+  } catch (_) {
+    ElMessage.error('复制失败')
+  }
+}
+
+const copyMcpExportEndpoint = async () => {
+  if (!mcpExportData.value.ready || !mcpExportData.value.url) {
+    ElMessage.warning('暂无可复制的 MCP 导出端点')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(mcpExportData.value.url)
+    ElMessage.success('MCP 导出端点已复制')
   } catch (_) {
     ElMessage.error('复制失败')
   }
@@ -721,6 +763,24 @@ onMounted(() => {
 
 .result-box {
   margin-top: 12px;
+}
+
+.export-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.export-box {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-help {
+  margin-top: 6px;
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .empty-box {
