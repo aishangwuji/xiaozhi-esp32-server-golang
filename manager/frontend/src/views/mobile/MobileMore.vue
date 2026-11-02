@@ -75,6 +75,7 @@ const serviceItems = [
   { title: 'UDP 配置', path: '/admin/udp-config' },
   { title: 'MCP 配置', path: '/admin/mcp-config' },
   { title: 'MCP 市场', path: '/admin/mcp-market' },
+  { title: 'NPC 工具目录', path: '/admin/npc-tools' },
   { title: '声纹识别配置', path: '/admin/speaker-config' },
   { title: '聊天设置', path: '/admin/chat-settings' }
 ]
