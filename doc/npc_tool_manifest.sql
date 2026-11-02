@@ -30,3 +30,6 @@ CREATE TABLE IF NOT EXISTS `npc_tool_manifest` (
 -- 种子示例（可选执行，验证用）：全局默认——所有 agent 的 npc_trade 描述统一收口
 -- INSERT INTO `npc_tool_manifest` (`agent_id`, `tool_name`, `description`, `input_schema`, `enabled`, `remark`)
 -- VALUES ('', 'npc_trade', '与该NPC进行物品买卖（浏览商品、购买、出售）。当玩家表达想买东西、卖东西、看看货品时调用。', '', 1, '阶段一验证种子');
+--
+-- 正式种子不要手写：用 esp32-watch/tools/gen_manifest_seed.py 从工具盘点结果生成
+-- （23 条登记 + 5 个高危 enabled=0，幂等可重复执行）。参见 doc/npc_tools_guide.md 第 4 节。

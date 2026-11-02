@@ -251,6 +251,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			{
 				// NPC 工具清单（工具描述服务端化）：覆盖/摘除设备侧上报的 MCP 工具
 				admin.GET("/npc-tools", adminController.GetNpcToolManifests)
+				admin.GET("/npc-tools/overview", adminController.GetNpcToolManifestOverview) // 目录总览：命中率/未登记/未命中
 				admin.POST("/npc-tools", adminController.UpsertNpcToolManifest)
 				admin.DELETE("/npc-tools/:id", adminController.DeleteNpcToolManifest)
 

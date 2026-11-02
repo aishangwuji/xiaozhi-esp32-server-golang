@@ -135,6 +135,15 @@ func (ac *AdminController) UpsertNpcToolManifest(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建工具清单条目失败"})
 			return
 		}
+		// Enabled 带 gorm default:true，bool 零值(false) 在 Create 时会被列默认值顶掉，
+		// 导致"新增一条 enabled=false"实际存成 true。创建后必须显式再落一次。
+		if !enabled {
+			if err := ac.DB.Model(&models.NpcToolManifest{}).Where("id = ?", row.ID).Update("enabled", false).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建工具清单条目失败: 摘除状态写入失败"})
+				return
+			}
+			row.Enabled = false
+		}
 		c.JSON(http.StatusCreated, gin.H{"data": row})
 		return
 	}

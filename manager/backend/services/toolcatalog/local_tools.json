@@ -1,0 +1,158 @@
+{
+  "board": "esp32-s3-touch-amoled-2.06",
+  "note": "由 esp32-watch/tools/tool_inventory.py --emit-catalog 生成，请勿手改",
+  "tools": [
+    {
+      "name": "self.audio_speaker.set_volume",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Set the volume of the audio speaker. If the current volume is unknown, you must…",
+      "conditional": false
+    },
+    {
+      "name": "self.camera.take_photo",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Always remember you have a camera. If the user asks you to see something, use",
+      "conditional": false
+    },
+    {
+      "name": "self.get_device_status",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Provides the real-time information of the device, including the current status o…",
+      "conditional": false
+    },
+    {
+      "name": "self.http.request",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Make one HTTP(S) request and return the response body as text. Useful for public",
+      "conditional": false
+    },
+    {
+      "name": "self.net.check_ports",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Check whether TCP ports are open on a host, like `nmap -p`. Ports as a comma",
+      "conditional": false
+    },
+    {
+      "name": "self.net.ping",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Ping a host (IP or domain name) and report packet loss and latency. Use it to ch…",
+      "conditional": false
+    },
+    {
+      "name": "self.net.scan_lan",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "List the devices currently on the same local network: IP, MAC address and a vend…",
+      "conditional": false
+    },
+    {
+      "name": "self.screen.set_brightness",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Set the brightness of the screen.",
+      "conditional": false
+    },
+    {
+      "name": "self.screen.set_theme",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Set the theme of the screen. The theme can be `light` or `dark`.",
+      "conditional": true
+    },
+    {
+      "name": "self.server.commands",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "List the whitelisted commands available on the user's server, each with a short",
+      "conditional": false
+    },
+    {
+      "name": "self.server.exec",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Run one whitelisted command on the user's own server (home server or cloud",
+      "conditional": false
+    },
+    {
+      "name": "self.set_press_to_talk",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/boards/common/press_to_talk_mcp_tool.cc",
+      "desc": "Switch between press to talk mode (长按说话) and click to talk mode (单击说话).",
+      "conditional": false
+    },
+    {
+      "name": "self.system.reconfigure_wifi",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/boards/waveshare/esp32-s3-touch-amoled-2.06/esp32-s3-touch-amoled-2.06.cc",
+      "desc": "End this conversation and enter WiFi configuration mode.",
+      "conditional": false
+    },
+    {
+      "name": "self.web_search.search",
+      "source": "firmware",
+      "file": "xiaozhi-esp32/main/mcp_server.cc",
+      "desc": "Search the live web. Use it whenever the answer depends on current",
+      "conditional": false
+    },
+    {
+      "name": "calculate",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_tool.go",
+      "desc": "精确计算数学表达式，结果由真实运算得出而非估算。凡涉及多位数加减乘除、乘方(^)、取模(%)、开方(sqrt)、百分比、多步混合运算，必须调用本工具后再回答，不…"
+    },
+    {
+      "name": "clear_conversation_history",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_tool.go",
+      "desc": "当用户要求清空、清除或重置历史对话记录时使用，用于清空当前会话的所有历史对话内容"
+    },
+    {
+      "name": "control_music_playback",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_media_control_tool.go",
+      "desc": "当用户要控制当前设备正在播放的音乐或音频时必须使用。对于“继续播放”“恢复播放”“继续听”“接着放”“暂停”“停止”“上一首”“下一首”“播放歌单”“播放歌单里…"
+    },
+    {
+      "name": "exit_conversation",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_tool.go",
+      "desc": "当用户明确表示要结束对话、退出系统或告别时使用，用于优雅地关闭当前聊天会话"
+    },
+    {
+      "name": "restore_device_default_role",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_tool.go",
+      "desc": "当用户要求恢复设备默认角色、取消当前设备角色覆盖时使用"
+    },
+    {
+      "name": "search_knowledge",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_tool.go",
+      "desc": "当用户问题需要事实依据、流程规则、参数细节、文档条款时，检索当前智能体关联知识库并返回相关片段；可选传 knowledge_base_ids 仅查指定知识库；闲…"
+    },
+    {
+      "name": "switch_device_role",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_tool.go",
+      "desc": "当用户要求把当前设备切换到某个角色时使用，参数 role_name 支持模糊匹配（会在全局角色和该设备所属用户角色中匹配）"
+    },
+    {
+      "name": "web_fetch",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_web_search_tool.go",
+      "desc": "网页抓取工具。抓取指定URL的网页并返回 Markdown 正文。通常在 web_search 的摘要信息不够、需要阅读某个结果全文时使用"
+    },
+    {
+      "name": "web_search",
+      "source": "local",
+      "file": "xiaozhi-golang-src/internal/app/server/chat/local_mcp_web_search_tool.go",
+      "desc": "联网搜索工具。当用户询问实时信息、新闻、天气、体育赛果、价格、版本发布等需要联网查询的最新内容，或你的知识可能过时时使用。支持 site:/-site:/精确短…"
+    }
+  ]
+}
