@@ -3,10 +3,10 @@
     <aside class="sidebar-shell">
       <div class="sidebar-card apple-surface">
         <div class="brand-panel">
-          <img class="brand-mark" :src="appLogo" alt="小智管理系统" />
+          <img class="brand-mark" :src="appLogo" alt="灵犀 NPC 控制台" />
           <div class="brand-copy">
             <p class="brand-eyebrow">Control Center</p>
-            <h3>小智管理系统</h3>
+            <h3>灵犀 NPC 控制台</h3>
             <p>{{ authStore.isAdmin ? 'AI 服务与设备管理台' : '设备与智能体工作台' }}</p>
           </div>
         </div>
@@ -72,6 +72,7 @@
                 <template #title>MCP 配置</template>
                 <el-menu-item class="menu-grandchild" index="/admin/mcp-config">配置</el-menu-item>
                 <el-menu-item class="menu-grandchild" index="/admin/mcp-market">MCP 市场</el-menu-item>
+                <el-menu-item class="menu-grandchild" index="/admin/npc-tools">NPC 工具目录</el-menu-item>
               </el-sub-menu>
               <el-menu-item index="/admin/speaker-config">声纹识别配置</el-menu-item>
               <el-menu-item index="/admin/chat-settings">聊天设置</el-menu-item>

@@ -11,7 +11,7 @@
         <div class="setup-header">
           <p class="setup-card-eyebrow">SYSTEM SETUP</p>
           <h1>系统初始化</h1>
-          <p>欢迎使用小智管理系统，请完成初始设置</p>
+          <p>欢迎使用灵犀 NPC 控制台，请完成初始设置</p>
         </div>
 
         <div v-if="!initialized" class="setup-status">

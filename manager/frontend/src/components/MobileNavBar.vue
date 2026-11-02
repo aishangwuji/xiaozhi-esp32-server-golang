@@ -23,7 +23,7 @@ import { useRouter } from 'vue-router'
 const props = defineProps({
   title: {
     type: String,
-    default: '小智管理系统'
+    default: '灵犀 NPC 控制台'
   },
   showBack: {
     type: Boolean,

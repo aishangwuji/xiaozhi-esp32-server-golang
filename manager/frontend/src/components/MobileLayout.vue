@@ -62,7 +62,7 @@ const showUserMenu = ref(false)
 
 // 页面标题
 const pageTitle = computed(() => {
-  return route.meta?.title || '小智管理系统'
+  return route.meta?.title || '灵犀 NPC 控制台'
 })
 
 // 是否显示返回按钮（非首页且不在标签栏页面时显示）

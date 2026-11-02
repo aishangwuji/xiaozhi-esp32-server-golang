@@ -1,8 +1,8 @@
 <template>
   <div class="mobile-login-container">
     <div class="mobile-login-header">
-      <img class="mobile-login-logo" :src="appLogo" alt="小智管理系统" />
-      <h1>小智管理系统</h1>
+      <img class="mobile-login-logo" :src="appLogo" alt="灵犀 NPC 控制台" />
+      <h1>灵犀 NPC 控制台</h1>
       <p>智能语音助手管理平台</p>
     </div>
     

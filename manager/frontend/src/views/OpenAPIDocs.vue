@@ -7,7 +7,7 @@
 
     <main class="vp-content">
       <header class="vp-hero">
-        <h1>小智 OpenAPI 文档</h1>
+        <h1>灵犀 NPC 控制台 OpenAPI 文档</h1>
         <p class="lead">公开可访问，按接口提供请求方式、参数、出参与示例。</p>
         <div class="hero-meta">
           <span>Base URL: <code>/api/open/v1</code></span>
