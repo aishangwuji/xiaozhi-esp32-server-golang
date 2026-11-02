@@ -551,7 +551,7 @@ const getOpenClawStatusKey = (agent) => {
 const getOpenClawStatusTooltip = (agent) => {
   const connection = openClawConnectionStatusMap[String(agent.id)]
   const configText = parseOpenClawConfig(agent).allowed ? '已启用' : '未启用'
-  return `OpenClaw状态：${configText}｜连接状态：${getConnectionStatusText(connection)}`
+  return `外部 Agent 接入（OpenClaw）：${configText}｜连接状态：${getConnectionStatusText(connection)}`
 }
 
 const ensureMcpConnectionStatus = async (agentId) => {

@@ -231,38 +231,51 @@
       </el-select>
     </el-form-item>
 
-    <div class="openclaw-panel">
-      <div class="openclaw-switch-row">
-        <span>允许进入 OpenClaw 模式</span>
-        <el-switch v-model="form.openclaw_allowed" />
-      </div>
-      <div class="agent-form-grid">
-        <el-form-item label="OpenClaw进入关键词">
-          <el-select
-            v-model="form.openclaw_enter_keywords"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            clearable
-            style="width: 100%"
-            placeholder="输入后回车，可添加多个关键词"
-          />
-        </el-form-item>
-        <el-form-item label="OpenClaw退出关键词">
-          <el-select
-            v-model="form.openclaw_exit_keywords"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            clearable
-            style="width: 100%"
-            placeholder="输入后回车，可添加多个关键词"
-          />
-        </el-form-item>
-      </div>
-    </div>
+    <!-- 外部 Agent 渠道（OpenClaw）：第三方产品接入，当前语音链路不依赖它。
+         默认折叠（activeNames 显式为空，不依赖组件默认值），避免与主线
+         （小智官方 TTS + 自建工具服务）混淆。 -->
+    <el-collapse v-model="openClawPanels" class="openclaw-collapse">
+      <el-collapse-item name="openclaw">
+        <template #title>
+          <div class="openclaw-collapse-title">
+            <span>外部 Agent 接入（OpenClaw · 高级 / 未启用）</span>
+            <el-tag size="small" type="info" effect="plain">可选</el-tag>
+          </div>
+        </template>
+        <div class="openclaw-panel">
+          <div class="openclaw-switch-row">
+            <span>允许进入 OpenClaw 模式</span>
+            <el-switch v-model="form.openclaw_allowed" />
+          </div>
+          <div class="agent-form-grid">
+            <el-form-item label="OpenClaw进入关键词">
+              <el-select
+                v-model="form.openclaw_enter_keywords"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                clearable
+                style="width: 100%"
+                placeholder="输入后回车，可添加多个关键词"
+              />
+            </el-form-item>
+            <el-form-item label="OpenClaw退出关键词">
+              <el-select
+                v-model="form.openclaw_exit_keywords"
+                multiple
+                filterable
+                allow-create
+                default-first-option
+                clearable
+                style="width: 100%"
+                placeholder="输入后回车，可添加多个关键词"
+              />
+            </el-form-item>
+          </div>
+        </div>
+      </el-collapse-item>
+    </el-collapse>
 
   </el-form>
 </template>
@@ -300,6 +313,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue'])
+
+// 外部 Agent 渠道默认收起（空数组 = 全部折叠），用户按需展开
+const openClawPanels = ref([])
 
 const form = computed({
   get: () => props.modelValue,
@@ -601,11 +617,23 @@ defineExpose({
 }
 
 .openclaw-panel {
-  margin-bottom: 18px;
   padding: 14px;
   border: 1px solid #ebeef5;
   border-radius: 8px;
   background: #fafafa;
+}
+
+.openclaw-collapse {
+  margin-bottom: 18px;
+  border-top: none;
+}
+
+.openclaw-collapse-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #6b7280;
 }
 
 .openclaw-switch-row {

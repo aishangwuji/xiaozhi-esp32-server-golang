@@ -3,14 +3,14 @@
     <div class="login-shell">
       <section class="login-hero">
         <div class="login-brand">
-          <img class="login-brand-logo" :src="appLogo" alt="小智管理系统" />
+          <img class="login-brand-logo" :src="appLogo" alt="灵犀 NPC 控制台" />
           <div>
-            <strong>小智管理系统</strong>
+            <strong>灵犀 NPC 控制台</strong>
             <span>AI 服务与设备管理平台</span>
           </div>
         </div>
-        <p class="login-eyebrow">XIAOZHI CONTROL CENTER</p>
-        <h1>小智 AI Go 到起飞。</h1>
+        <p class="login-eyebrow">LINGXI NPC CONTROL CENTER</p>
+        <h1>让每个 NPC 都听得见、答得出。</h1>
         <p>
           统一管理智能体、声纹、知识库与服务接入，让设备、模型和语音能力在同一个工作台里协同运行。
         </p>
@@ -18,7 +18,7 @@
           <span class="apple-chip is-primary">智能体编排</span>
           <span class="apple-chip">设备接入</span>
           <span class="apple-chip">声纹与知识库</span>
-          <span class="apple-chip">MCP / OpenClaw</span>
+          <span class="apple-chip">MCP 工具目录</span>
           <span class="apple-chip">MCP 远程调用</span>
           <span class="apple-chip">主动语音下发</span>
         </div>

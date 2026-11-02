@@ -54,7 +54,7 @@
         <template #default="{ row }">
           <el-button size="small" @click="editAgent(row)">编辑</el-button>
           <el-button size="small" type="primary" @click="openDiagnostics(row, 'mcp')">MCP</el-button>
-          <el-button size="small" type="success" @click="openDiagnostics(row, 'openclaw')">OpenClaw</el-button>
+          <el-button size="small" type="success" @click="openDiagnostics(row, 'openclaw')">外部 Agent</el-button>
           <el-button size="small" type="danger" @click="deleteAgent(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -120,7 +120,7 @@ const diagnosticAgent = ref(null)
 const diagnosticPanel = ref('mcp')
 const diagnosticsTitle = computed(() => {
   const name = diagnosticAgent.value?.name || `智能体 ${diagnosticAgent.value?.id || ''}`
-  return diagnosticPanel.value === 'openclaw' ? `${name} - OpenClaw` : `${name} - MCP`
+  return diagnosticPanel.value === 'openclaw' ? `${name} - 外部 Agent 接入（OpenClaw）` : `${name} - MCP`
 })
 
 const loadAgents = async () => {

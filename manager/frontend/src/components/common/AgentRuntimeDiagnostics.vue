@@ -97,12 +97,21 @@
       <el-collapse-item name="openclaw">
         <template #title>
           <div class="collapse-title">
-            <strong>OpenClaw</strong>
+            <strong>外部 Agent 接入（OpenClaw）</strong>
             <span>{{ openClawSummaryText }}</span>
           </div>
         </template>
 
         <div class="diagnostic-section">
+          <el-alert type="info" :closable="false" show-icon class="channel-notice">
+            <template #title>可选渠道 · 当前语音链路不依赖</template>
+            <span>
+              这是把第三方 OpenClaw 网关接到本服务的外部渠道配置，用于在 OpenClaw 会话里调用本服务的
+              xiaozhi 能力。主线（小智官方 TTS + 自建工具服务）不需要它；
+              下面的 <code>openclaw config set</code> 命令属于 OpenClaw 自身的 CLI，须原样执行。
+            </span>
+          </el-alert>
+
           <div class="status-row">
             <div>
               <div class="field-label">连接状态</div>
@@ -781,6 +790,17 @@ onMounted(() => {
   color: #6b7280;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.channel-notice {
+  margin-bottom: 14px;
+}
+
+.channel-notice code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.06);
+  font-size: 11px;
 }
 
 .empty-box {
