@@ -118,7 +118,13 @@ func (ac *AdminController) GetNpcToolManifestOverview(c *gin.Context) {
 					it.Live = true
 					it.Sources = appendUnique(it.Sources, "live:device")
 				}
-				deviceNote = ""
+				// 设备离线时底层返回的是"空列表且 err=nil"，不区分就会让运营误判成
+				// "设备在线但没有工具"。这里显式说明，避免误读。
+				if len(tools) == 0 {
+					deviceNote = "设备未上报任何工具（可能离线，或尚未完成 tools/list）"
+				} else {
+					deviceNote = ""
+				}
 			}
 		}
 	}

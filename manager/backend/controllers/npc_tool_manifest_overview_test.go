@@ -236,3 +236,42 @@ func TestUpsertNpcToolManifestPersistsDisabled(t *testing.T) {
 		t.Fatalf("重新启用失败，enabled 仍为 false")
 	}
 }
+
+// TestGetNpcToolManifestOverviewDeviceWithoutController 传了 device_id 但控制器不可用时，
+// 必须给出明确说明而不是静默返回空列表（否则会被误读成"设备在线但没有工具"）。
+func TestGetNpcToolManifestOverviewDeviceWithoutController(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	db := setupAgentDeviceServiceTestDB(t)
+	if err := db.AutoMigrate(&models.NpcToolManifest{}); err != nil {
+		t.Fatalf("migrate npc_tool_manifest: %v", err)
+	}
+
+	router := gin.New()
+	adminController := &AdminController{DB: db} // WebSocketController 故意留空
+	router.GET("/api/admin/npc-tools/overview", adminController.GetNpcToolManifestOverview)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/admin/npc-tools/overview?device_id=4", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	var payload struct {
+		Data struct {
+			DeviceNote string `json:"device_note"`
+			Totals     struct {
+				Live int `json:"live"`
+			} `json:"totals"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Data.DeviceNote == "" {
+		t.Fatalf("device_id 传了但控制器不可用时 device_note 不能为空")
+	}
+	if payload.Data.Totals.Live != 0 {
+		t.Fatalf("控制器不可用时 live 应为 0，实际 %d", payload.Data.Totals.Live)
+	}
+}
