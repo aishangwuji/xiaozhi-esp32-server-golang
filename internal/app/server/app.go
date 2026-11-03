@@ -89,6 +89,10 @@ func (a *App) Run() {
 	// 启动资源池统计上报（每5秒上报一次到 manager backend）
 	pool.StartStatsReporter(ctx)
 
+	// 启动 NPC 常驻 Agent 的定时决策回路（npc_agent.enabled=false 时只打一行日志）
+	// 放在最后：它依赖 ws endpoint MCP 通道，游戏端连上来之前每一轮都会被跳过。
+	StartNpcAgentScheduler(context.Background())
+
 	select {} // 阻塞主线程
 }
 

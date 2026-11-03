@@ -441,3 +441,43 @@ voice_identify:
   enable: true
   base_url: "http://192.168.208.214:8080"
   threshold: 0.4  # 声纹识别阈值，范围 0.0-1.0，默认 0.6
+
+# NPC 常驻 Agent：定时决策回路（意图 → 动作 → 回执）
+# 客户端只提供"身体 + 通用动作脚本"，由这里的定时任务决定每个 NPC 下一步做什么。
+# 关闭时 NPC 不会自己走动，只在语音对话中经 npc_act 工具被驱动。
+npc_agent:
+  enabled: false                # 总开关；关掉时本段其余配置完全不起作用
+  tick_seconds: 1               # 调度扫描粒度（秒）
+  default_interval_seconds: 30  # 未单独配置 interval_seconds 的 agent 的决策周期
+  failure_cooldown_seconds: 60  # 失败后的基础退避；连续失败按 2^n 递增
+  max_backoff_seconds: 600      # 退避上限
+  status_timeout_seconds: 8     # npc_status 调用超时
+  act_timeout_seconds: 8        # npc_act 调用超时
+  decide_timeout_seconds: 25    # 单次决策（LLM）超时，必须明显小于最短决策周期
+  max_status_chars: 1200        # 状态快照截断长度
+  max_reason_chars: 120         # 决策理由截断长度
+  # 决策用的模型。独立于设备会话的 LLM 配置，不占用设备额度。
+  # provider 名与下面的配置块名一致；base_url 可省略（deepseek/doubao 等有内置默认值）
+  llm:
+    provider: "deepseek"
+    deepseek:
+      type: "openai"
+      model_name: "deepseek-chat"
+      api_key: "sk-replace-me"
+      max_tokens: 300
+  # 每个 NPC 一条：id 必须与游戏侧 MCP 通道 JWT 里的 agentId 一致
+  agents:
+    - id: "bob-agent"
+      name: "铁匠 鲍勃"
+      persona: "固执直率、重情义的铁匠，白天守着铁匠铺打铁，厌恶流氓在铺子前闹事。"
+      interval_seconds: 30
+      enabled: true
+      allowed_actions: ["walk", "run", "talk", "wait", "stop"]
+    - id: "charlie-agent"
+      name: "学者 查理"
+      persona: "博学文雅、好奇心重的学者，常在书斋与广场之间走动，乐于观察路人。"
+      interval_seconds: 45
+    - id: "dave-agent"
+      name: "巡守 戴夫"
+      persona: "恪尽职守的哨塔守卫，会沿要塞北门一带巡逻，遇可疑者上前盘问。"
+      interval_seconds: 30
