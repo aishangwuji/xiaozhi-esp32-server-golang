@@ -498,3 +498,119 @@ func TestSchedulerSkipsWhenStatusRejected(t *testing.T) {
 		t.Fatal("读不到状态时不应进入决策")
 	}
 }
+
+// ── 热更新（控制台改完配置要能生效，否则就是死配置） ──
+
+func TestReloadKeepsRuntimeState(t *testing.T) {
+	clock := newFakeClock()
+	bridge := &fakeBridge{online: true}
+	brain := &fakeBrain{decision: Decision{Action: "wait", Params: map[string]any{"duration": 1}}}
+	s := newScheduler(t, testConfig(10), brain, bridge, clock)
+
+	clock.Advance(10 * time.Second)
+	s.Step(context.Background())
+	if snap := s.Snapshot(); snap[0].Runs != 1 {
+		t.Fatalf("前置条件不成立: %+v", snap[0])
+	}
+
+	// 只改人格与周期：计数不能被重置，否则每改一次配置 NPC 就重新热身
+	next := testConfig(60)
+	next.Agents[0].Persona = "改了人格的铁匠"
+	if err := s.Reload(next); err != nil {
+		t.Fatalf("热更新失败: %v", err)
+	}
+	snap := s.Snapshot()
+	if snap[0].Runs != 1 {
+		t.Fatalf("热更新不应重置运行计数，实际 %+v", snap[0])
+	}
+	if snap[0].IntervalSec != 60 {
+		t.Fatalf("周期应更新为 60s，实际 %d", snap[0].IntervalSec)
+	}
+
+	// 新周期生效：推进 10s（旧周期）不应触发，推进到 60s 才触发
+	clock.Advance(10 * time.Second)
+	s.Step(context.Background())
+	if bridge.statusIn != 1 {
+		t.Fatalf("旧周期不应再触发，实际读取 %d 次", bridge.statusIn)
+	}
+}
+
+func TestReloadAddsAndRemovesAgents(t *testing.T) {
+	clock := newFakeClock()
+	bobBridge := &fakeBridge{online: true}
+	daveBridge := &fakeBridge{online: true}
+	brain := &fakeBrain{decision: Decision{Action: "wait"}}
+	s, err := New(testConfig(10), brain, map[string]Bridge{"bob": bobBridge, "dave": daveBridge},
+		WithClock(clock.Now), WithLogger(quietLogger))
+	if err != nil {
+		t.Fatalf("构造失败: %v", err)
+	}
+	if s.AgentCount() != 1 {
+		t.Fatalf("初始应只有 1 个 agent，实际 %d", s.AgentCount())
+	}
+
+	withDave := testConfig(10)
+	withDave.Agents = append(withDave.Agents, AgentConfig{ID: "dave", Name: "巡守戴夫"})
+	if err := s.Reload(withDave); err != nil {
+		t.Fatalf("热更新失败: %v", err)
+	}
+	if s.AgentCount() != 2 {
+		t.Fatalf("新增后应有 2 个 agent，实际 %d", s.AgentCount())
+	}
+
+	clock.Advance(10 * time.Second)
+	s.Step(context.Background())
+	if daveBridge.statusIn != 1 {
+		t.Fatalf("新增的 agent 应被驱动，实际读取 %d 次", daveBridge.statusIn)
+	}
+
+	// 删掉 dave：只保留 bob
+	if err := s.Reload(testConfig(10)); err != nil {
+		t.Fatalf("热更新失败: %v", err)
+	}
+	if s.AgentCount() != 1 {
+		t.Fatalf("删除后应剩 1 个 agent，实际 %d", s.AgentCount())
+	}
+}
+
+func TestReloadCanDisableAndReenable(t *testing.T) {
+	clock := newFakeClock()
+	bridge := &fakeBridge{online: true}
+	brain := &fakeBrain{decision: Decision{Action: "wait"}}
+	s := newScheduler(t, testConfig(5), brain, bridge, clock)
+
+	off := testConfig(5)
+	off.Enabled = false
+	if err := s.Reload(off); err != nil {
+		t.Fatalf("关闭失败: %v", err)
+	}
+	clock.Advance(30 * time.Second)
+	s.Step(context.Background())
+	if bridge.statusIn != 0 {
+		t.Fatal("总开关关闭时不应驱动任何 agent")
+	}
+
+	if err := s.Reload(testConfig(5)); err != nil {
+		t.Fatalf("重新开启失败: %v", err)
+	}
+	clock.Advance(5 * time.Second)
+	s.Step(context.Background())
+	if bridge.statusIn != 1 {
+		t.Fatalf("重新开启后应恢复驱动，实际读取 %d 次", bridge.statusIn)
+	}
+}
+
+func TestReloadRejectsInvalidConfigAndKeepsOld(t *testing.T) {
+	clock := newFakeClock()
+	bridge := &fakeBridge{online: true}
+	brain := &fakeBrain{decision: Decision{Action: "wait"}}
+	s := newScheduler(t, testConfig(10), brain, bridge, clock)
+
+	bad := Config{Enabled: true} // 启用但没有任何 agent
+	if err := s.Reload(bad); err == nil {
+		t.Fatal("非法配置应返回错误")
+	}
+	if s.AgentCount() != 1 || !s.Enabled() {
+		t.Fatalf("非法配置不应影响原有计划，实际 agents=%d enabled=%v", s.AgentCount(), s.Enabled())
+	}
+}

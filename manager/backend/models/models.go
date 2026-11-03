@@ -350,12 +350,12 @@ func (m *ChatMessage) AfterFind(tx *gorm.DB) error {
 //   - agent_id 为空串的条目是全局默认清单，agent 专属条目优先于全局条目。
 type NpcToolManifest struct {
 	ID          uint      `json:"id" gorm:"primarykey"`
-	AgentID     string    `json:"agent_id" gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_npc_tool_agent_tool,priority:1"`    // 智能体ID（agents.id 的字符串形态）；空串=全局默认清单
+	AgentID     string    `json:"agent_id" gorm:"type:varchar(64);not null;default:'';uniqueIndex:uk_npc_tool_agent_tool,priority:1"`   // 智能体ID（agents.id 的字符串形态）；空串=全局默认清单
 	ToolName    string    `json:"tool_name" gorm:"type:varchar(128);not null;default:'';uniqueIndex:uk_npc_tool_agent_tool,priority:2"` // MCP工具名，与设备侧上报的工具名严格一致（如 npc_trade）
-	Description string    `json:"description" gorm:"type:text"`               // 覆盖工具描述（LLM 据此判定调用时机）；空串=不覆盖
-	InputSchema string    `json:"input_schema" gorm:"type:text"`              // 覆盖工具入参 schema（openapi3 JSON 对象文本）；空串=不覆盖
-	Enabled     bool      `json:"enabled" gorm:"default:true"`                // 是否启用；false=聚合时从工具列表摘除（云端总开关）
-	Remark      string    `json:"remark" gorm:"type:varchar(255);default:''"` // 运营备注（改动原因等，仅人工查阅）
+	Description string    `json:"description" gorm:"type:text"`                                                                         // 覆盖工具描述（LLM 据此判定调用时机）；空串=不覆盖
+	InputSchema string    `json:"input_schema" gorm:"type:text"`                                                                        // 覆盖工具入参 schema（openapi3 JSON 对象文本）；空串=不覆盖
+	Enabled     bool      `json:"enabled" gorm:"default:true"`                                                                          // 是否启用；false=聚合时从工具列表摘除（云端总开关）
+	Remark      string    `json:"remark" gorm:"type:varchar(255);default:''"`                                                           // 运营备注（改动原因等，仅人工查阅）
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -363,4 +363,49 @@ type NpcToolManifest struct {
 // TableName 指定表名
 func (NpcToolManifest) TableName() string {
 	return "npc_tool_manifest"
+}
+
+// NpcAgentConfig NPC 常驻 Agent 的调度配置（主服务定时决策回路）
+//
+// 语义：
+//   - 一行 = 游戏里一个 NPC 的"身体"通道；agent_id 必须等于游戏侧 ws endpoint MCP
+//     通道 JWT 里的 agentId（不是游戏内的 npc_id）；
+//   - 主服务启动时与每 60s 经 /api/internal/npc-agents 拉取本表 + npc_agent_settings，
+//     覆盖 main_config.yaml 中的同名项并热更新调度计划——改完即生效，无需重启；
+//   - allowed_actions 为空表示使用默认动作全集（walk/run/jump/talk/attack/wait/stop）。
+type NpcAgentConfig struct {
+	ID              uint      `json:"id" gorm:"primarykey"`
+	AgentID         string    `json:"agent_id" gorm:"type:varchar(64);not null;uniqueIndex:uk_npc_agent_agent_id"` // 游戏侧 MCP 通道的 agentId
+	Name            string    `json:"name" gorm:"type:varchar(64);not null;default:''"`                            // 展示名（同时作为提示词里的自称）
+	Persona         string    `json:"persona" gorm:"type:text"`                                                    // 角色设定：拼进决策提示词的人设段落
+	IntervalSeconds int       `json:"interval_seconds" gorm:"not null;default:30"`                                 // 决策周期（秒）
+	Enabled         bool      `json:"enabled" gorm:"not null;default:true"`                                        // 单个 NPC 的启停
+	AllowedActions  string    `json:"allowed_actions" gorm:"type:varchar(255);not null;default:''"`                // 逗号分隔的动作白名单；空=默认全集
+	Remark          string    `json:"remark" gorm:"type:varchar(255);not null;default:''"`                         // 运营备注（改动原因等）
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// TableName 指定表名
+func (NpcAgentConfig) TableName() string {
+	return "npc_agent_config"
+}
+
+// NpcAgentSettings NPC Agent 调度器的全局设置（单行，ID 固定为 1）
+//
+// 与 per-agent 配置的关系：这里是"调度器怎么跑"，NpcAgentConfig 是"每个 NPC 做什么"。
+// 决策模型（provider/api_key）刻意留在 main_config.yaml：密钥不进数据库、不经前端回显。
+type NpcAgentSettings struct {
+	ID                     uint      `json:"id" gorm:"primarykey"`
+	Enabled                bool      `json:"enabled" gorm:"not null;default:false"` // 调度总开关
+	TickSeconds            int       `json:"tick_seconds" gorm:"not null;default:1"`
+	DefaultIntervalSeconds int       `json:"default_interval_seconds" gorm:"not null;default:30"`
+	DecideTimeoutSeconds   int       `json:"decide_timeout_seconds" gorm:"not null;default:25"`
+	MaxStatusChars         int       `json:"max_status_chars" gorm:"not null;default:1200"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+// TableName 指定表名
+func (NpcAgentSettings) TableName() string {
+	return "npc_agent_settings"
 }

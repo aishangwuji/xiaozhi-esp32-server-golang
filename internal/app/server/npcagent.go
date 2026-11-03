@@ -5,9 +5,12 @@ package server
 // 把 domain 层的纯逻辑接到真实设施上：
 //   - Bridge：游戏客户端（每个 NPC 一条 ws endpoint MCP 通道）暴露的 npc_status / npc_act
 //   - Brain  ：走 llm.LLMProvider，用 npcagent.BuildPrompt 生成的提示词要一个 JSON 决策
+//   - 配置   ：main_config.yaml 的 npc_agent 段做引导；控制台库（/api/internal/npc-agents）
+//     接管后每 60s 拉一次并热更新，改完不用重启
+//   - 状态   ：NpcAgentStatusSnapshot() 供 GET /internal/npc-agents/status 只读暴露
 //
-// 为什么桥接层不放进 domain/npcagent：那两个包依赖 cgo 音频与 eino，会让纯逻辑包无法单测。
-// 这里只做装配，不含任何决策逻辑。
+// 为什么桥接层不放进 domain/npcagent：那个包要求零 cgo 依赖以便单测；这里只做装配，
+// 不含任何决策逻辑。
 //
 // 红线（对齐项目 AGENTS.md）：
 //   - 不在这里判断玩家意图，也不做关键词兜底：决策完全由模型给出，本层只校验契约；
@@ -16,18 +19,27 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/spf13/viper"
 
+	componentshttp "xiaozhi-esp32-server-golang/internal/components/http"
 	"xiaozhi-esp32-server-golang/internal/domain/llm"
 	"xiaozhi-esp32-server-golang/internal/domain/mcp"
 	"xiaozhi-esp32-server-golang/internal/domain/npcagent"
+	"xiaozhi-esp32-server-golang/internal/util"
 	log "xiaozhi-esp32-server-golang/logger"
+)
+
+const (
+	// npcAgentConfigRefresh 配置热更新周期：控制台改完最迟这么久生效
+	npcAgentConfigRefresh = 60 * time.Second
+	// npcAgentFetchTimeout 拉配置的超时：走本机回环，正常是毫秒级
+	npcAgentFetchTimeout = 5 * time.Second
 )
 
 // npcMcpBridge 通过 ws endpoint MCP 通道操作某个 NPC 的身体
@@ -121,6 +133,25 @@ type mcpToolResult struct {
 	IsError bool `json:"isError"`
 }
 
+// parseToolResult 从 MCP 返回里取出文本与错误标记；不是标准结构时整段当文本。
+func parseToolResult(out string) (string, bool) {
+	var result mcpToolResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		return out, false
+	}
+	parts := make([]string, 0, len(result.Content))
+	for _, item := range result.Content {
+		if item.Type == "text" && item.Text != "" {
+			parts = append(parts, item.Text)
+		}
+	}
+	text := strings.Join(parts, "\n")
+	if text == "" {
+		text = out
+	}
+	return text, result.IsError
+}
+
 // npcLLMBrain 用服务端配置的 LLM 做一次决策
 type npcLLMBrain struct {
 	provider llm.LLMProvider
@@ -145,7 +176,7 @@ func (b *npcLLMBrain) Decide(ctx context.Context, req npcagent.DecideRequest) (n
 			continue
 		}
 		if llm.IsLLMErrorMessage(msg) {
-			return npcagent.Decision{}, errors.New(llm.LLMErrorMessage(msg))
+			return npcagent.Decision{}, fmt.Errorf("%s", llm.LLMErrorMessage(msg))
 		}
 		if truncated {
 			continue // 继续排空 channel，避免上游 goroutine 卡在写入上
@@ -157,13 +188,107 @@ func (b *npcLLMBrain) Decide(ctx context.Context, req npcagent.DecideRequest) (n
 		}
 	}
 	if strings.TrimSpace(sb.String()) == "" {
-		return npcagent.Decision{}, errors.New("模型没有返回内容")
+		return npcagent.Decision{}, fmt.Errorf("模型没有返回内容")
 	}
 	return npcagent.ParseDecision(sb.String())
 }
 
-// loadNpcAgentConfig 从 main_config.yaml 的 npc_agent 段读配置
-func loadNpcAgentConfig() (npcagent.Config, error) {
+// ── 运行期状态 ──
+
+// npcAgentRuntime 常驻单例：调度器 + 当前生效配置 + 装配错误
+type npcAgentRuntime struct {
+	mu sync.RWMutex
+	// sched 首次启用时才创建：未启用时没必要校验模型密钥
+	sched *npcagent.Scheduler
+	cfg   npcagent.Config
+	// errMsg 装配失败原因（缺 provider/密钥等），原样透给控制台，
+	// 避免"页面显示已开启但 NPC 不动"这种无解排查
+	errMsg string
+	// configSource 当前配置来源：yaml / manager
+	configSource string
+	appliedAt    time.Time
+}
+
+var npcAgentRT = &npcAgentRuntime{}
+
+// NpcAgentStatusSnapshot 只读状态快照（无任何副作用），供 HTTP 接口与控制台使用
+func NpcAgentStatusSnapshot() map[string]any {
+	npcAgentRT.mu.RLock()
+	cfg := npcAgentRT.cfg
+	sched := npcAgentRT.sched
+	errMsg := npcAgentRT.errMsg
+	source := npcAgentRT.configSource
+	appliedAt := npcAgentRT.appliedAt
+	npcAgentRT.mu.RUnlock()
+
+	agents := []npcagent.AgentSnapshot{}
+	running := 0
+	if sched != nil {
+		agents = sched.Snapshot()
+		running = sched.AgentCount()
+	}
+
+	provider := strings.TrimSpace(viper.GetString("npc_agent.llm.provider"))
+	modelName := strings.TrimSpace(viper.GetString("npc_agent.llm." + provider + ".model_name"))
+
+	return map[string]any{
+		"enabled":           cfg.Enabled,
+		"running":           sched != nil,
+		"agent_count":       running,
+		"tick_seconds":      cfg.TickSeconds,
+		"default_interval":  cfg.DefaultIntervalSeconds,
+		"config_source":     source,
+		"config_applied_at": appliedAt,
+		"error":             errMsg,
+		// 决策模型只报告 provider/model，不回显任何密钥
+		"llm": map[string]any{
+			"provider":   provider,
+			"model_name": modelName,
+		},
+		"agents": agents,
+	}
+}
+
+// ── 配置：yaml 引导 + 控制台接管 ──
+
+// managerNpcAgentsPayload 控制台内部接口的响应（字段与 controllers/npc_agent.go 对齐）
+type managerNpcAgentsPayload struct {
+	SettingsManaged bool `json:"settings_managed"`
+	AgentsManaged   bool `json:"agents_managed"`
+	Settings        struct {
+		Enabled                bool `json:"enabled"`
+		TickSeconds            int  `json:"tick_seconds"`
+		DefaultIntervalSeconds int  `json:"default_interval_seconds"`
+		DecideTimeoutSeconds   int  `json:"decide_timeout_seconds"`
+		MaxStatusChars         int  `json:"max_status_chars"`
+	} `json:"settings"`
+	Agents []struct {
+		ID              string   `json:"id"`
+		Name            string   `json:"name"`
+		Persona         string   `json:"persona"`
+		IntervalSeconds int      `json:"interval_seconds"`
+		Enabled         bool     `json:"enabled"`
+		AllowedActions  []string `json:"allowed_actions"`
+	} `json:"agents"`
+}
+
+var npcAgentManagerHTTPOnce sync.Once
+var npcAgentManagerHTTP *componentshttp.ManagerClient
+
+func getNpcAgentManagerClient() *componentshttp.ManagerClient {
+	npcAgentManagerHTTPOnce.Do(func() {
+		npcAgentManagerHTTP = componentshttp.NewManagerClient(componentshttp.ManagerClientConfig{
+			BaseURL:    util.GetBackendURL(),
+			AuthToken:  util.GetManagerAuthToken(),
+			Timeout:    npcAgentFetchTimeout,
+			MaxRetries: 1,
+		})
+	})
+	return npcAgentManagerHTTP
+}
+
+// loadYamlConfig 读 main_config.yaml 的 npc_agent 段
+func loadYamlConfig() (npcagent.Config, error) {
 	var cfg npcagent.Config
 	sub := viper.Sub("npc_agent")
 	if sub == nil {
@@ -175,60 +300,211 @@ func loadNpcAgentConfig() (npcagent.Config, error) {
 	return cfg, nil
 }
 
+// loadYamlConfigSafe 热更新周期里读 yaml：读失败时沿用当前生效配置。
+// 绝不能回退成空配置——那等于把 Enabled 静默改成 false，NPC 会毫无解释地停下。
+func loadYamlConfigSafe() npcagent.Config {
+	cfg, err := loadYamlConfig()
+	if err != nil {
+		log.Warnf("[npcagent] 重新读取 yaml 配置失败（沿用当前配置）: %v", err)
+		npcAgentRT.mu.RLock()
+		current := npcAgentRT.cfg
+		npcAgentRT.mu.RUnlock()
+		return current
+	}
+	return cfg
+}
+
+// fetchManagerConfig 拉控制台配置；返回 nil 表示控制台还没接管或不可达
+func fetchManagerConfig(ctx context.Context) *managerNpcAgentsPayload {
+	raw, err := getNpcAgentManagerClient().DoRequestRaw(ctx, componentshttp.RequestOptions{
+		Method: "GET",
+		Path:   "/api/internal/npc-agents",
+	})
+	if err != nil {
+		log.Warnf("[npcagent] 拉取控制台配置失败（沿用当前配置）: %v", err)
+		return nil
+	}
+	var payload managerNpcAgentsPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		log.Warnf("[npcagent] 控制台配置解析失败（沿用当前配置）: %v", err)
+		return nil
+	}
+	return &payload
+}
+
+// resolveConfig 合并 yaml 与控制台配置。规则（控制台页面文案与此一致）：
+//   - settings_managed=true → 控制台的全局设置接管 yaml 同类字段
+//   - agents_managed=true   → 控制台的 agent 列表接管 yaml 的 agents（删掉即停）
+//   - 都不满足               → 纯 yaml 生效（没登录过控制台也能跑）
+func resolveConfig(yamlCfg npcagent.Config, remote *managerNpcAgentsPayload) (npcagent.Config, string) {
+	if remote == nil {
+		return yamlCfg, "yaml"
+	}
+	merged := yamlCfg
+	source := "yaml"
+
+	if remote.SettingsManaged {
+		merged.Enabled = remote.Settings.Enabled
+		if remote.Settings.TickSeconds > 0 {
+			merged.TickSeconds = remote.Settings.TickSeconds
+		}
+		if remote.Settings.DefaultIntervalSeconds > 0 {
+			merged.DefaultIntervalSeconds = remote.Settings.DefaultIntervalSeconds
+		}
+		if remote.Settings.DecideTimeoutSeconds > 0 {
+			merged.DecideTimeoutSeconds = remote.Settings.DecideTimeoutSeconds
+		}
+		if remote.Settings.MaxStatusChars > 0 {
+			merged.MaxStatusChars = remote.Settings.MaxStatusChars
+		}
+		source = "manager"
+	}
+
+	if remote.AgentsManaged {
+		agents := make([]npcagent.AgentConfig, 0, len(remote.Agents))
+		for _, a := range remote.Agents {
+			enabled := a.Enabled
+			agents = append(agents, npcagent.AgentConfig{
+				ID:              strings.TrimSpace(a.ID),
+				Name:            a.Name,
+				Persona:         a.Persona,
+				IntervalSeconds: a.IntervalSeconds,
+				Enabled:         &enabled,
+				AllowedActions:  a.AllowedActions,
+			})
+		}
+		merged.Agents = agents
+		source = "manager"
+	}
+	return merged, source
+}
+
 // buildNpcAgentLLM 创建决策用的 LLM 提供者。
 // 独立于设备会话的 LLM 配置：NPC 的日常决策是服务端自己的开销，不该混用某个设备的模型额度。
-func buildNpcAgentLLM() (llm.LLMProvider, error) {
+func buildNpcAgentLLM() (llm.LLMProvider, string, error) {
 	providerName := strings.TrimSpace(viper.GetString("npc_agent.llm.provider"))
 	if providerName == "" {
-		return nil, errors.New("未配置 npc_agent.llm.provider")
+		return nil, "", fmt.Errorf("未配置 npc_agent.llm.provider（决策模型），NPC 无法自主决策")
 	}
 	providerConfig := viper.GetStringMap("npc_agent.llm." + providerName)
 	if len(providerConfig) == 0 {
-		return nil, fmt.Errorf("未找到 npc_agent.llm.%s 配置块", providerName)
+		return nil, providerName, fmt.Errorf("未找到 npc_agent.llm.%s 配置块", providerName)
 	}
-	return llm.GetLLMProvider(providerName, providerConfig)
+	provider, err := llm.GetLLMProvider(providerName, providerConfig)
+	if err != nil {
+		return nil, providerName, err
+	}
+	return provider, providerName, nil
 }
 
-// StartNpcAgentScheduler 按配置装配并启动调度器；未启用时返回 nil 且不做任何事。
+// applyConfig 应用一份配置：首次启用时创建调度器，之后只做热更新
+func (rt *npcAgentRuntime) applyConfig(ctx context.Context, cfg npcagent.Config, source string) {
+	normalized, err := cfg.Normalize()
+	if err != nil {
+		rt.mu.Lock()
+		rt.errMsg = err.Error()
+		rt.mu.Unlock()
+		log.Errorf("[npcagent] 配置无效: %v", err)
+		return
+	}
+
+	rt.mu.RLock()
+	existing := rt.sched
+	rt.mu.RUnlock()
+
+	if existing == nil {
+		if !normalized.Enabled {
+			rt.mu.Lock()
+			rt.cfg = normalized
+			rt.configSource = source
+			rt.appliedAt = time.Now()
+			rt.errMsg = ""
+			rt.mu.Unlock()
+			log.Infof("[npcagent] 未启用：NPC 只在收到工具调用时行动（可在控制台开启）")
+			return
+		}
+		provider, providerName, err := buildNpcAgentLLM()
+		if err != nil {
+			rt.mu.Lock()
+			rt.cfg = normalized
+			rt.configSource = source
+			rt.appliedAt = time.Now()
+			rt.errMsg = err.Error()
+			rt.mu.Unlock()
+			log.Errorf("[npcagent] 决策模型初始化失败: %v", err)
+			return
+		}
+		brain := &npcLLMBrain{provider: provider, maxStatusChars: normalized.MaxStatusChars}
+		sched, err := npcagent.New(normalized, brain, nil,
+			npcagent.WithBridgeResolver(func(agentID string) npcagent.Bridge {
+				return newNpcMcpBridge(agentID)
+			}))
+		if err != nil {
+			rt.mu.Lock()
+			rt.cfg = normalized
+			rt.configSource = source
+			rt.appliedAt = time.Now()
+			rt.errMsg = err.Error()
+			rt.mu.Unlock()
+			log.Errorf("[npcagent] 构造调度器失败: %v", err)
+			return
+		}
+		go sched.Run(ctx)
+
+		rt.mu.Lock()
+		rt.sched = sched
+		rt.cfg = normalized
+		rt.configSource = source
+		rt.appliedAt = time.Now()
+		rt.errMsg = ""
+		rt.mu.Unlock()
+
+		log.Infof("[npcagent] 已启动: agents=%d provider=%s source=%s", sched.AgentCount(), providerName, source)
+		return
+	}
+
+	if err := existing.Reload(normalized); err != nil {
+		rt.mu.Lock()
+		rt.errMsg = err.Error()
+		rt.mu.Unlock()
+		log.Errorf("[npcagent] 热更新失败（保持原计划）: %v", err)
+		return
+	}
+
+	rt.mu.Lock()
+	rt.cfg = existing.EffectiveConfig()
+	rt.configSource = source
+	rt.appliedAt = time.Now()
+	rt.errMsg = ""
+	rt.mu.Unlock()
+	log.Infof("[npcagent] 配置已热更新: agents=%d enabled=%v source=%s",
+		existing.AgentCount(), existing.Enabled(), source)
+}
+
+// StartNpcAgentScheduler 装配并启动调度器，随后每 60s 拉一次控制台配置做热更新。
 // 失败只记日志不 panic：NPC 不自己走动不应该拖垮整个语音服务。
 func StartNpcAgentScheduler(ctx context.Context) {
-	cfg, err := loadNpcAgentConfig()
+	yamlCfg, err := loadYamlConfig()
 	if err != nil {
 		log.Errorf("[npcagent] %v", err)
 		return
 	}
-	normalized, err := cfg.Normalize()
-	if err != nil {
-		log.Errorf("[npcagent] 配置无效: %v", err)
-		return
-	}
-	if !normalized.Enabled || len(normalized.Agents) == 0 {
-		log.Infof("[npcagent] 未启用（npc_agent.enabled），NPC 只会在收到工具调用时行动")
-		return
-	}
 
-	provider, err := buildNpcAgentLLM()
-	if err != nil {
-		log.Errorf("[npcagent] 初始化决策模型失败: %v", err)
-		return
-	}
-	brain := &npcLLMBrain{provider: provider, maxStatusChars: normalized.MaxStatusChars}
+	// 先按 yaml 起，再立刻拉一次控制台配置覆盖，避免启动后 60s 内跑旧配置
+	cfg, source := resolveConfig(yamlCfg, fetchManagerConfig(ctx))
+	npcAgentRT.applyConfig(ctx, cfg, source)
 
-	bridges := make(map[string]npcagent.Bridge, len(normalized.Agents))
-	for _, agent := range normalized.Agents {
-		bridges[agent.ID] = newNpcMcpBridge(agent.ID)
-	}
-
-	scheduler, err := npcagent.New(normalized, brain, bridges)
-	if err != nil {
-		log.Errorf("[npcagent] 构造调度器失败: %v", err)
-		return
-	}
-
-	go scheduler.Run(ctx)
-	log.Infof("[npcagent] 已启动: agents=%d", scheduler.AgentCount())
-	for _, snap := range scheduler.Snapshot() {
-		log.Infof("[npcagent] agent=%s name=%s interval=%ds online=%v",
-			snap.ID, snap.Name, snap.IntervalSec, snap.Online)
-	}
+	go func() {
+		ticker := time.NewTicker(npcAgentConfigRefresh)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				next, nextSource := resolveConfig(loadYamlConfigSafe(), fetchManagerConfig(ctx))
+				npcAgentRT.applyConfig(ctx, next, nextSource)
+			}
+		}
+	}()
 }

@@ -27,6 +27,10 @@ import (
 // 这类结果不是基础设施故障：不该按指数退避惩罚，只记一次拒绝、下个周期再试。
 var ErrActionRejected = errors.New("动作被拒绝")
 
+// BridgeResolver 按 agent id 取通道。用解析函数而不是固定 map，
+// 是因为配置（进而 agent 集合）可以在运行期由控制台热更新。
+type BridgeResolver func(agentID string) Bridge
+
 // Bridge 与游戏客户端（每个 NPC 一条 MCP 通道）对话的抽象。
 // 真实实现走 ws endpoint MCP 工具，测试里用假实现。
 type Bridge interface {
@@ -86,8 +90,17 @@ type Scheduler struct {
 	logf  func(format string, args ...any)
 	now   func() time.Time
 
-	mu     sync.Mutex
-	states []*agentState
+	mu       sync.Mutex
+	states   []*agentState
+	bridges  map[string]Bridge
+	resolver BridgeResolver
+}
+
+// WithBridgeResolver 用解析函数替代固定 map（控制台可新增 agent 时用它）
+func WithBridgeResolver(resolver BridgeResolver) Option {
+	return func(s *Scheduler) {
+		s.resolver = resolver
+	}
 }
 
 // Option 可选依赖注入（时钟/日志），便于测试确定性
@@ -122,48 +135,123 @@ func New(cfg Config, brain Brain, bridges map[string]Bridge, opts ...Option) (*S
 	}
 
 	s := &Scheduler{
-		cfg:   normalized,
-		brain: brain,
-		now:   time.Now,
-		logf:  log.Printf,
+		cfg:     normalized,
+		brain:   brain,
+		now:     time.Now,
+		logf:    log.Printf,
+		bridges: bridges,
 	}
 	for _, opt := range opts {
 		opt(s)
 	}
+	s.states = s.buildStates(normalized, nil)
+	return s, nil
+}
 
+// buildStates 按配置生成 agent 运行状态。existing 里同一 id 的条目会被复用，
+// 保证热更新后计数与"下次到期时间"不丢（否则每改一次配置 NPC 就重新起跑一轮）。
+func (s *Scheduler) buildStates(cfg Config, existing map[string]*agentState) []*agentState {
 	base := s.now()
-	for _, a := range normalized.Agents {
+	states := make([]*agentState, 0, len(cfg.Agents))
+	for _, a := range cfg.Agents {
 		if !a.IsEnabled() {
 			continue
 		}
-		bridge := bridges[a.ID]
-		s.states = append(s.states, &agentState{
+		if old, ok := existing[a.ID]; ok && old != nil {
+			old.cfg = a
+			old.bridge = s.bridgeFor(a.ID)
+			// 周期改了就按"上次运行 + 新周期"重算下次时间，否则用户把 60s 改成 10s 要等一分钟才生效；
+			// 但失败退避中的 agent 保留原 nextDue，不能因为改配置就把退避清零。
+			if old.failures == 0 {
+				if old.lastRunAt.IsZero() {
+					old.nextDue = base.Add(a.Interval())
+				} else {
+					old.nextDue = old.lastRunAt.Add(a.Interval())
+				}
+			}
+			states = append(states, old)
+			continue
+		}
+		states = append(states, &agentState{
 			cfg:    a,
-			bridge: bridge,
+			bridge: s.bridgeFor(a.ID),
 			// 首轮错开一个周期起跑，避免所有 agent 在同一秒抢同一个游戏连接
 			nextDue: base.Add(a.Interval()),
 		})
 	}
-	return s, nil
+	return states
+}
+
+func (s *Scheduler) bridgeFor(agentID string) Bridge {
+	if s.resolver != nil {
+		return s.resolver(agentID)
+	}
+	if s.bridges == nil {
+		return nil
+	}
+	return s.bridges[agentID]
+}
+
+// Reload 用新配置热替换调度计划。管理器控制台改了人格/周期/启停后由调用方触发。
+// 配置非法时返回错误且保持原有计划不变——不能因为一份坏配置把整个调度停掉。
+func (s *Scheduler) Reload(cfg Config) error {
+	normalized, err := cfg.Normalize()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	existing := make(map[string]*agentState, len(s.states))
+	for _, st := range s.states {
+		existing[st.cfg.ID] = st
+	}
+	s.cfg = normalized
+	s.states = s.buildStates(normalized, existing)
+	return nil
+}
+
+// Enabled 当前生效配置里调度总开关的状态（管理端据此显示"为什么没在动"）
+func (s *Scheduler) Enabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.Enabled
+}
+
+// EffectiveConfig 返回当前生效配置的副本（只读，用于状态接口）
+func (s *Scheduler) EffectiveConfig() Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
 }
 
 // Run 阻塞运行直到 ctx 取消。单 goroutine 顺序推进，不做并发调度。
+// 常驻循环：即使用户在控制台把总开关关掉也继续跑，只是不再推进任何 agent，
+// 这样"关掉再打开"不需要重启进程。基础节拍固定 1s，实际扫描间隔读配置，
+// 因此 TickSeconds 改动能立即生效。
 func (s *Scheduler) Run(ctx context.Context) {
-	if !s.cfg.Enabled || len(s.states) == 0 {
-		s.logf("[npcagent] 未启用或没有可运行的 agent，调度器不启动")
-		return
-	}
-	interval := time.Duration(s.cfg.TickSeconds) * time.Second
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	s.logf("[npcagent] 调度器启动: agents=%d tick=%s", len(s.states), interval)
+	s.logf("[npcagent] 调度器已就绪: agents=%d enabled=%v", len(s.states), s.Enabled())
 
+	var elapsed time.Duration
 	for {
 		select {
 		case <-ctx.Done():
 			s.logf("[npcagent] 调度器停止")
 			return
 		case <-ticker.C:
+			elapsed += time.Second
+			cfg := s.EffectiveConfig()
+			tick := time.Duration(cfg.TickSeconds) * time.Second
+			if tick <= 0 {
+				tick = time.Second
+			}
+			if elapsed < tick {
+				continue
+			}
+			elapsed = 0
 			s.Step(ctx)
 		}
 	}
@@ -174,6 +262,10 @@ func (s *Scheduler) Step(ctx context.Context) {
 	now := s.now()
 
 	s.mu.Lock()
+	if !s.cfg.Enabled {
+		s.mu.Unlock()
+		return
+	}
 	due := make([]*agentState, 0, len(s.states))
 	for _, st := range s.states {
 		if st.nextDue.After(now) {

@@ -33,6 +33,8 @@ type WebSocketServer struct {
 	onNewConnection    types.OnNewConnection
 	onOpenClawResponse func(event openclaw.ResponseDelivery) bool
 	onInjectMessage    func(deviceID, message string, skipLlm bool, autoListen bool) error
+	// npcAgentStatusProvider NPC 常驻 Agent 状态快照（只读，管理端拉取）
+	npcAgentStatusProvider npcAgentStatusProvider
 }
 
 // Option 类型定义
@@ -115,6 +117,8 @@ func (s *WebSocketServer) Start() error {
 	http.HandleFunc("/xiaozhi/api/vision", s.handleVisionAPI) //图片识别API
 
 	http.HandleFunc("/admin/inject_msg", s.handleInjectMsg)
+	// NPC 常驻 Agent 只读状态：由控制台经内部 token 访问（nginx 未反代该前缀，不对外）
+	http.HandleFunc("/internal/npc-agents/status", s.handleNpcAgentStatus)
 
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", s.port)
 	log.Infof("WebSocket 服务器启动在 ws://%s/xiaozhi/v1/", listenAddr)

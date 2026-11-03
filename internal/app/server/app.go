@@ -191,6 +191,10 @@ func (app *App) newWebSocketServer() *websocket.WebSocketServer {
 			}
 			return chatManager.InjectMessage(message, skipLlm, autoListen)
 		}),
+		// NPC 常驻 Agent 只读状态：控制台经内部 token 拉取，用于展示"为什么没在动"
+		websocket.WithNpcAgentStatusProvider(func() any {
+			return NpcAgentStatusSnapshot()
+		}),
 	)
 }
 

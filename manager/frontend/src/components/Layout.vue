@@ -74,6 +74,7 @@
                 <el-menu-item class="menu-grandchild" index="/admin/mcp-market">MCP 市场</el-menu-item>
                 <el-menu-item class="menu-grandchild" index="/admin/npc-tools">NPC 工具目录</el-menu-item>
               </el-sub-menu>
+              <el-menu-item index="/admin/npc-agents">NPC 常驻 Agent</el-menu-item>
               <el-menu-item index="/admin/speaker-config">声纹识别配置</el-menu-item>
               <el-menu-item index="/admin/chat-settings">聊天设置</el-menu-item>
             </el-sub-menu>

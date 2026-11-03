@@ -41,6 +41,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 		EndpointAuthToken:   endpointAuthToken,
 	}
 	deviceActivationController := &controllers.DeviceActivationController{DB: db}
+	npcAgentController := controllers.NewNpcAgentController(db, internalAuthToken)
 	setupController := &controllers.SetupController{DB: db}
 	speakerGroupController := controllers.NewSpeakerGroupController(db, cfg)
 	voiceCloneController := controllers.NewVoiceCloneController(db, cfg)
@@ -92,6 +93,7 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 			internal.POST("/internal/devices/:device_name/switch-role", adminController.SwitchDeviceRoleByNameInternal)
 			internal.POST("/internal/devices/:device_name/restore-default-role", adminController.RestoreDeviceDefaultRoleInternal)
 			internal.GET("/internal/npc-tools", adminController.GetNpcToolManifestsInternal) // NPC工具清单：主服务聚合工具时拉取覆盖项
+			internal.GET("/internal/npc-agents", npcAgentController.GetNpcAgentsInternal)    // NPC常驻Agent：主服务定时回路拉取调度配置
 		}
 
 		// 需要认证的路由
@@ -254,6 +256,14 @@ func Setup(db *gorm.DB, cfg *config.Config) *gin.Engine {
 				admin.GET("/npc-tools/overview", adminController.GetNpcToolManifestOverview) // 目录总览：命中率/未登记/未命中
 				admin.POST("/npc-tools", adminController.UpsertNpcToolManifest)
 				admin.DELETE("/npc-tools/:id", adminController.DeleteNpcToolManifest)
+
+				// NPC 常驻 Agent（服务端定时决策回路）：配置点 + 运行状态
+				admin.GET("/npc-agents", npcAgentController.GetNpcAgents)
+				admin.POST("/npc-agents", npcAgentController.UpsertNpcAgent)
+				admin.DELETE("/npc-agents/:id", npcAgentController.DeleteNpcAgent)
+				admin.GET("/npc-agents/settings", npcAgentController.GetNpcAgentSettings)
+				admin.PUT("/npc-agents/settings", npcAgentController.UpdateNpcAgentSettings)
+				admin.GET("/npc-agents/status", npcAgentController.GetNpcAgentStatus)
 
 				// 通用配置管理
 				admin.GET("/configs", adminController.GetConfigs)

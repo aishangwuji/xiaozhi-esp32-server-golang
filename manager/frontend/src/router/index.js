@@ -204,6 +204,12 @@ const routes = [
             name: 'AdminNpcTools',
             component: () => import('../views/admin/NpcToolManifest.vue'),
             meta: { title: 'NPC 工具目录' }
+          },
+          {
+            path: 'npc-agents',
+            name: 'AdminNpcAgents',
+            component: () => import('../views/admin/NpcAgents.vue'),
+            meta: { title: 'NPC 常驻 Agent' }
           }
         ]
       },
