@@ -89,9 +89,12 @@
             </el-tag>
           </div>
           <div class="list-actions">
+            <el-button :loading="refreshingStatus" @click="refreshRuntime">
+              刷新状态
+            </el-button>
             <el-button :loading="loading" @click="load">
               <el-icon><Refresh /></el-icon>
-              刷新
+              刷新配置
             </el-button>
             <el-button type="primary" @click="openCreate">
               <el-icon><Plus /></el-icon>
@@ -241,6 +244,7 @@ import {
 const loading = ref(false)
 const saving = ref(false)
 const savingSettings = ref(false)
+const refreshingStatus = ref(false)
 const dialogVisible = ref(false)
 
 const agents = ref([])
@@ -295,25 +299,46 @@ function formatTime(value) {
 async function load() {
   loading.value = true
   try {
-    const response = await api.get('/admin/npc-agents')
-    const data = response.data || {}
+    // 配置与运行状态在列表接口里；全局设置走独立接口（设置与 agent 列表是两类东西）
+    const [listResp, settingsResp] = await Promise.all([
+      api.get('/admin/npc-agents'),
+      api.get('/admin/npc-agents/settings')
+    ])
+    const data = listResp.data || {}
     agents.value = Array.isArray(data.agents) ? data.agents : []
     knownActions.value = Array.isArray(data.known_actions) && data.known_actions.length
       ? data.known_actions
       : knownActions.value
     agentsManaged.value = !!data.agents_managed
-    settingsManaged.value = !!data.settings_managed
     runtime.value = data.runtime || {}
 
-    if (data.settings) {
-      settings.enabled = !!data.settings.enabled
-      settings.tick_seconds = data.settings.tick_seconds ?? 1
-      settings.default_interval_seconds = data.settings.default_interval_seconds ?? 30
-      settings.decide_timeout_seconds = data.settings.decide_timeout_seconds ?? 25
-      settings.max_status_chars = data.settings.max_status_chars ?? 1200
-    }
+    const settingsData = settingsResp.data || {}
+    settingsManaged.value = !!settingsData.managed
+    applySettings(settingsData.settings)
   } finally {
     loading.value = false
+  }
+}
+
+function applySettings(raw) {
+  if (!raw) {
+    return
+  }
+  settings.enabled = !!raw.enabled
+  settings.tick_seconds = raw.tick_seconds ?? 1
+  settings.default_interval_seconds = raw.default_interval_seconds ?? 30
+  settings.decide_timeout_seconds = raw.decide_timeout_seconds ?? 25
+  settings.max_status_chars = raw.max_status_chars ?? 1200
+}
+
+// 只刷新运行状态：不重读配置，用于观察"NPC 刚才做了什么"
+async function refreshRuntime() {
+  refreshingStatus.value = true
+  try {
+    const response = await api.get('/admin/npc-agents/status')
+    runtime.value = response.data || {}
+  } finally {
+    refreshingStatus.value = false
   }
 }
 
