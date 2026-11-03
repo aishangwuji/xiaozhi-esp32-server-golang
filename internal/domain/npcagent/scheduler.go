@@ -14,6 +14,7 @@ package npcagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -21,6 +22,10 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrActionRejected 表示"动作被游戏端明确拒绝"（NPC 正在忙、已倒地、参数不合规等）。
+// 这类结果不是基础设施故障：不该按指数退避惩罚，只记一次拒绝、下个周期再试。
+var ErrActionRejected = errors.New("动作被拒绝")
 
 // Bridge 与游戏客户端（每个 NPC 一条 MCP 通道）对话的抽象。
 // 真实实现走 ws endpoint MCP 工具，测试里用假实现。
@@ -209,6 +214,14 @@ func (s *Scheduler) runAgent(ctx context.Context, st *agentState) {
 	status, err := st.bridge.Status(statusCtx)
 	cancelStatus()
 	if err != nil {
+		if errors.Is(err, ErrActionRejected) {
+			// 读不到状态通常意味着这个 NPC 此刻不在场景里：本轮跳过，不算故障
+			s.mu.Lock()
+			st.skips++
+			s.mu.Unlock()
+			s.logf("[npcagent] %s 读不到状态，本轮跳过: %v", st.cfg.ID, err)
+			return
+		}
 		s.fail(st, "读状态失败: "+err.Error())
 		return
 	}
@@ -243,6 +256,18 @@ func (s *Scheduler) runAgent(ctx context.Context, st *agentState) {
 	receipt, err := st.bridge.Act(actCtx, decision.ActArgs())
 	cancelAct()
 	if err != nil {
+		if errors.Is(err, ErrActionRejected) {
+			// 游戏端说"现在做不了"：NPC 在忙/倒地/路不通。这不算故障，
+			// 记一次拒绝（不推进退避），让下一个周期重新决策。
+			s.mu.Lock()
+			st.rejects++
+			st.lastAct = decision.Action
+			st.lastWhy = decision.Reason
+			st.lastErr = err.Error()
+			s.mu.Unlock()
+			s.logf("[npcagent] %s 动作 %s 被拒绝: %v", st.cfg.ID, decision.Action, err)
+			return
+		}
 		s.fail(st, "下发动作失败: "+err.Error())
 		return
 	}

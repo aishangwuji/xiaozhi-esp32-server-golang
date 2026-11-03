@@ -19,8 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
-	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/spf13/viper"
 
@@ -33,6 +33,8 @@ import (
 // npcMcpBridge 通过 ws endpoint MCP 通道操作某个 NPC 的身体
 type npcMcpBridge struct {
 	agentID string
+	// 离线提示只打一次：每个周期刷一行"离线"会把日志淹掉，反而看不到真正的错误
+	offlineOnce sync.Once
 }
 
 func newNpcMcpBridge(agentID string) *npcMcpBridge {
@@ -45,23 +47,51 @@ func (b *npcMcpBridge) Available() bool {
 		return false
 	}
 	connected, _ := mcp.GetWsEndpointConnectionStatus(b.agentID)
-	return connected
+	if connected {
+		return true
+	}
+	b.offlineOnce.Do(func() {
+		// agentId 藏在游戏侧 token 里，写错不会报错、只会永远"离线"。
+		// 这里把当前真正在线的通道打出来，让配置错误一眼可见。
+		if others := mcp.ListConnectedWsEndpointAgentIDs(); len(others) > 0 {
+			log.Warnf("[npcagent] 配置的 agent=%s 没有在线通道，但当前在线的是 %v —— 检查 agentId 是否与游戏侧 JWT 一致",
+				b.agentID, others)
+		} else {
+			log.Infof("[npcagent] agent=%s 暂无在线通道，等游戏端连上来再开始驱动", b.agentID)
+		}
+	})
+	return false
 }
 
-func (b *npcMcpBridge) runTool(ctx context.Context, name string, argsJSON string) (string, error) {
+// runTool 调用设备侧工具，返回文本 + 是否被业务拒绝（rejected）+ 调用错误。
+// 三者必须分开：rejected 是"NPC 现在做不了"，调用错误才是"通道坏了"。
+func (b *npcMcpBridge) runTool(ctx context.Context, name string, argsJSON string) (string, bool, error) {
 	tools, err := mcp.GetWsEndpointMcpTools(b.agentID)
 	if err != nil {
-		return "", fmt.Errorf("读取 %s 的工具清单失败: %w", b.agentID, err)
+		return "", false, fmt.Errorf("读取 %s 的工具清单失败: %w", b.agentID, err)
 	}
 	invokable, ok := tools[name]
 	if !ok {
-		return "", fmt.Errorf("%s 上没有工具 %s（游戏端可能未连接）", b.agentID, name)
+		// 客户端版本不支持该工具：属于能力不可用，不是通道故障
+		return "", true, fmt.Errorf("%s 上没有工具 %s（游戏端可能未连接或版本过旧）", b.agentID, name)
 	}
-	return invokeTool(ctx, invokable, name, argsJSON)
+	out, err := invokable.InvokableRun(ctx, argsJSON)
+	if err != nil {
+		return "", false, fmt.Errorf("调用工具 %s 失败: %w", name, err)
+	}
+	text, isErr := parseToolResult(out)
+	return text, isErr, nil
 }
 
 func (b *npcMcpBridge) Status(ctx context.Context) (string, error) {
-	return b.runTool(ctx, "npc_status", "{}")
+	text, rejected, err := b.runTool(ctx, "npc_status", "{}")
+	if err != nil {
+		return "", err
+	}
+	if rejected {
+		return text, fmt.Errorf("%w: %s", npcagent.ErrActionRejected, text)
+	}
+	return text, nil
 }
 
 func (b *npcMcpBridge) Act(ctx context.Context, args map[string]any) (string, error) {
@@ -69,17 +99,26 @@ func (b *npcMcpBridge) Act(ctx context.Context, args map[string]any) (string, er
 	if err != nil {
 		return "", fmt.Errorf("动作入参序列化失败: %w", err)
 	}
-	return b.runTool(ctx, "npc_act", string(payload))
+	text, rejected, err := b.runTool(ctx, "npc_act", string(payload))
+	if err != nil {
+		return text, err
+	}
+	if rejected {
+		// NPC 正在忙/倒地/走不通：本轮没做成，但通道是好的，不该退避
+		return text, fmt.Errorf("%w: %s", npcagent.ErrActionRejected, text)
+	}
+	return text, nil
 }
 
-// invokeTool 调用设备侧 MCP 工具；工具侧返回的错误文本要当失败抛出，
-// 否则调度器会把"动作没做成"记成成功，结果就是 NPC 永远站在原地还以为在干活。
-func invokeTool(ctx context.Context, invokable tool.InvokableTool, name string, argsJSON string) (string, error) {
-	out, err := invokable.InvokableRun(ctx, argsJSON)
-	if err != nil {
-		return "", fmt.Errorf("调用工具 %s 失败: %w", name, err)
-	}
-	return out, nil
+// mcpToolResult 是 MCP tools/call 的标准返回结构。
+// 游戏侧的 isError 是业务失败（例如"动作参数不合法""NPC 已力竭倒地"），
+// 必须当错误处理，否则调度器会把"没做成"记成成功、下次还发同样的动作。
+type mcpToolResult struct {
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	IsError bool `json:"isError"`
 }
 
 // npcLLMBrain 用服务端配置的 LLM 做一次决策

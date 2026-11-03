@@ -345,6 +345,19 @@ func GetWsEndpointConnectionStatus(agentId string) (bool, int) {
 	return client.GetWsEndpointConnectionStatus()
 }
 
+// ListConnectedWsEndpointAgentIDs 列出当前有 ws endpoint MCP 客户端在线且已初始化的 agentId。
+// 用于服务端排查"配置里的 agentId 与游戏侧通道对不上"这类静默失败：
+// 只读、不改变任何连接状态；顺序不保证。
+func ListConnectedWsEndpointAgentIDs() []string {
+	ids := make([]string, 0, 8)
+	for agentID := range mcpClientPool.device2McpClient.Items() {
+		if connected, _ := GetWsEndpointConnectionStatus(agentID); connected {
+			ids = append(ids, agentID)
+		}
+	}
+	return ids
+}
+
 // GetReportedToolsByDeviceID 获取设备通过 Iot over MCP 上报的工具。
 // 控制台设备维度仅返回 websocket / mqtt_udp(udp) transport 下的工具，不混入 ws endpoint 等其它类型。
 func GetReportedToolsByDeviceID(deviceId string) (map[string]tool.InvokableTool, error) {

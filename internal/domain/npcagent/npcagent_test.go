@@ -3,6 +3,7 @@ package npcagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -451,5 +452,49 @@ func TestSchedulerMissingBridgeSkips(t *testing.T) {
 	snap := s.Snapshot()
 	if snap[0].Skips != 1 {
 		t.Fatalf("没有通道的 agent 应记为跳过: %+v", snap[0])
+	}
+}
+
+// 游戏端明确拒绝（NPC 正在忙/倒地）不是故障：只记拒绝，不推进退避，
+// 否则一个正在走长路的 NPC 会把自己的退避拖到十分钟。
+func TestSchedulerCountsRejectedActionWithoutBackoff(t *testing.T) {
+	clock := newFakeClock()
+	bridge := &fakeBridge{online: true, actEr: fmt.Errorf("%w: npc.act.busy", ErrActionRejected)}
+	brain := &fakeBrain{decision: Decision{Action: "wait", Params: map[string]any{"duration": 2}}}
+	cfg := testConfig(20)
+	cfg.FailureCooldownSeconds = 60
+	s := newScheduler(t, cfg, brain, bridge, clock)
+
+	clock.Advance(20 * time.Second)
+	s.Step(context.Background())
+
+	snap := s.Snapshot()
+	if snap[0].Rejects != 1 {
+		t.Fatalf("应记一次拒绝，实际 %+v", snap[0])
+	}
+	if snap[0].Failures != 0 {
+		t.Fatalf("业务拒绝不应计入失败，实际 %+v", snap[0])
+	}
+	if wait := snap[0].NextRunAt.Sub(clock.Now()); wait != 20*time.Second {
+		t.Fatalf("业务拒绝不应退避，下一次应仍是一个周期后，实际 %s", wait)
+	}
+}
+
+// 读不到状态（NPC 不在场景）按跳过处理，不推进退避
+func TestSchedulerSkipsWhenStatusRejected(t *testing.T) {
+	clock := newFakeClock()
+	bridge := &fakeBridge{online: true, statusEr: fmt.Errorf("%w: 不在场景", ErrActionRejected)}
+	brain := &fakeBrain{decision: Decision{Action: "wait"}}
+	s := newScheduler(t, testConfig(10), brain, bridge, clock)
+
+	clock.Advance(10 * time.Second)
+	s.Step(context.Background())
+
+	snap := s.Snapshot()
+	if snap[0].Skips != 1 || snap[0].Failures != 0 {
+		t.Fatalf("状态读取被拒应记为跳过: %+v", snap[0])
+	}
+	if len(brain.requests) != 0 {
+		t.Fatal("读不到状态时不应进入决策")
 	}
 }
