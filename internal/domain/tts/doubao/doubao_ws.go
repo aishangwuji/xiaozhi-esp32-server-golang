@@ -30,6 +30,7 @@ var doubaoWSRequestHeader = []byte{0x11, 0x10, 0x11, 0x00}
 type DoubaoWSProvider struct {
 	AppID       string
 	AccessToken string
+	APIKey      string
 	Model       string
 	ResourceID  string
 	Voice       string
@@ -44,6 +45,7 @@ type doubaoWSAttemptResult struct {
 func NewDoubaoWSProvider(config map[string]interface{}) *DoubaoWSProvider {
 	appID, _ := config["appid"].(string)
 	accessToken, _ := config["access_token"].(string)
+	apiKey, _ := config["api_key"].(string)
 	model, _ := config["model"].(string)
 	resourceID, _ := config["resource_id"].(string)
 	voice, _ := config["voice"].(string)
@@ -62,6 +64,7 @@ func NewDoubaoWSProvider(config map[string]interface{}) *DoubaoWSProvider {
 	return &DoubaoWSProvider{
 		AppID:       appID,
 		AccessToken: accessToken,
+		APIKey:      strings.TrimSpace(apiKey),
 		Model:       normalizeDoubaoModel(model),
 		ResourceID:  strings.TrimSpace(resourceID),
 		Voice:       strings.TrimSpace(voice),
@@ -140,7 +143,7 @@ func (p *DoubaoWSProvider) textToSpeechStreamWithModel(ctx context.Context, text
 		return nil, fmt.Errorf("构建豆包 WebSocket TTS 请求失败: %w", err)
 	}
 
-	headers := doubaoapi.NewTTSWebsocketHeaders(p.AppID, p.AccessToken, resolved.ResourceID, doubaoapi.NewConnectID())
+	headers := doubaoapi.NewTTSWebsocketHeaders(p.AppID, p.AccessToken, p.APIKey, resolved.ResourceID, doubaoapi.NewConnectID())
 	conn, resp, err := wsDialer.DialContext(ctx, p.WSURL, headers)
 	if err != nil {
 		return nil, formatDoubaoWSConnectError(err, resp)

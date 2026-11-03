@@ -23,11 +23,24 @@
     </el-form-item>
 
     <template v-if="model.provider === 'doubao_ws'">
-      <el-form-item label="应用ID" prop="doubao_ws.appid">
-        <el-input v-model="model.doubao_ws.appid" placeholder="请输入应用ID" />
+      <el-form-item label="API Key" prop="doubao_ws.api_key">
+        <el-input
+          v-model="model.doubao_ws.api_key"
+          placeholder="新版控制台「API Key 管理」里的 Key；填了就优先用它"
+          type="password"
+          show-password
+        />
       </el-form-item>
-      <el-form-item label="访问令牌" prop="doubao_ws.access_token">
-        <el-input v-model="model.doubao_ws.access_token" placeholder="请输入访问令牌" type="password" show-password />
+      <el-form-item label="应用ID（旧版）" prop="doubao_ws.appid">
+        <el-input v-model="model.doubao_ws.appid" placeholder="旧版控制台的 APP ID；用 API Key 时留空" />
+      </el-form-item>
+      <el-form-item label="访问令牌（旧版）" prop="doubao_ws.access_token">
+        <el-input
+          v-model="model.doubao_ws.access_token"
+          placeholder="旧版控制台的 Access Token；用 API Key 时留空"
+          type="password"
+          show-password
+        />
       </el-form-item>
       <el-form-item label="模型" prop="doubao_ws.model">
         <el-select v-model="model.doubao_ws.model" placeholder="请选择模型" style="width: 100%">
@@ -35,7 +48,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="资源 ID" prop="doubao_ws.resource_id">
-        <el-input v-model="model.doubao_ws.resource_id" placeholder="可选；如 TTS-SeedTTS2.xxxxx，优先使用控制台实例 ID" />
+        <el-input v-model="model.doubao_ws.resource_id" placeholder="seed-tts-2.0（豆包语音合成 2.0）/ seed-tts-1.0" />
       </el-form-item>
       <el-form-item label="音色" prop="doubao_ws.voice">
         <el-select

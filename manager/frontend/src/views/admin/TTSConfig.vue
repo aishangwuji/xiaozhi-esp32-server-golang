@@ -173,11 +173,12 @@ const form = reactive({
     api_url: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
   },
   doubao_ws: {
-    appid: '6886011847',
-    access_token: 'access_token',
+    api_key: '',
+    appid: '',
+    access_token: '',
     model: 'seed-tts-2.0-standard',
-    resource_id: '',
-    voice: '',
+    resource_id: 'seed-tts-2.0',
+    voice: 'zh_female_vv_uranus_bigtts',
     ws_url: 'wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream'
   },
   edge: {
@@ -293,8 +294,8 @@ const rules = {
   'doubao.voice': [{ required: true, message: '请输入音色', trigger: 'blur' }],
   'doubao.api_url': [{ required: true, message: '请输入API URL', trigger: 'blur' }],
   // 豆包 WebSocket 验证规则
-  'doubao_ws.appid': [{ required: true, message: '请输入应用ID', trigger: 'blur' }],
-  'doubao_ws.access_token': [{ required: true, message: '请输入访问令牌', trigger: 'blur' }],
+  'doubao_ws.appid': [{ required: false, message: '请输入应用ID', trigger: 'blur' }],
+  'doubao_ws.access_token': [{ required: false, message: '请输入访问令牌', trigger: 'blur' }],
   'doubao_ws.model': [{ required: true, message: '请选择模型', trigger: 'change' }],
   'doubao_ws.voice': [{ required: true, message: '请输入音色', trigger: 'blur' }],
   'doubao_ws.ws_url': [{ required: true, message: '请输入WebSocket URL', trigger: 'blur' }],
@@ -378,6 +379,7 @@ const editConfig = (config) => {
         form.doubao.api_url = configData.api_url || 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
         break
       case 'doubao_ws':
+        form.doubao_ws.api_key = configData.api_key || ''
         form.doubao_ws.appid = configData.appid || ''
         form.doubao_ws.access_token = configData.access_token || ''
         form.doubao_ws.model = configData.model || 'seed-tts-2.0-standard'
@@ -721,11 +723,12 @@ const resetForm = () => {
       api_url: 'https://openspeech.bytedance.com/api/v3/tts/unidirectional'
     },
     doubao_ws: {
-      appid: '6886011847',
-      access_token: 'access_token',
+      api_key: '',
+      appid: '',
+      access_token: '',
       model: 'seed-tts-2.0-standard',
-      resource_id: '',
-      voice: '',
+      resource_id: 'seed-tts-2.0',
+      voice: 'zh_female_vv_uranus_bigtts',
       ws_url: 'wss://openspeech.bytedance.com/api/v3/tts/unidirectional/stream'
     },
     edge: {

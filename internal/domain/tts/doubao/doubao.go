@@ -49,6 +49,7 @@ func getHTTPClient() *http.Client {
 type DoubaoTTSProvider struct {
 	AppID       string
 	AccessToken string
+	APIKey      string
 	Model       string
 	ResourceID  string
 	Voice       string
@@ -88,6 +89,7 @@ type doubaoTTSV3Event struct {
 func NewDoubaoTTSProvider(config map[string]interface{}) *DoubaoTTSProvider {
 	appID, _ := config["appid"].(string)
 	accessToken, _ := config["access_token"].(string)
+	apiKey, _ := config["api_key"].(string)
 	model, _ := config["model"].(string)
 	resourceID, _ := config["resource_id"].(string)
 	voice, _ := config["voice"].(string)
@@ -96,6 +98,7 @@ func NewDoubaoTTSProvider(config map[string]interface{}) *DoubaoTTSProvider {
 	return &DoubaoTTSProvider{
 		AppID:       appID,
 		AccessToken: accessToken,
+		APIKey:      strings.TrimSpace(apiKey),
 		Model:       normalizeDoubaoModel(model),
 		ResourceID:  strings.TrimSpace(resourceID),
 		Voice:       strings.TrimSpace(voice),
@@ -167,7 +170,7 @@ func (p *DoubaoTTSProvider) streamHTTP(ctx context.Context, text string, sampleR
 	if err != nil {
 		return nil, fmt.Errorf("创建豆包 TTS 请求失败: %w", err)
 	}
-	headers := doubaoapi.NewTTSHeaders(p.AppID, p.AccessToken, resolved.ResourceID)
+	headers := doubaoapi.NewTTSHeaders(p.AppID, p.AccessToken, p.APIKey, resolved.ResourceID)
 	for key, values := range headers {
 		for _, value := range values {
 			req.Header.Add(key, value)
